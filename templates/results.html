@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results for {{ name }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 800px; /* Wider container for results */
+            width: 100%;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .result-item {
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            background-color: #fdfdfd;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .result-item h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #3498db;
+            font-size: 1.2em;
+        }
+        .result-item p {
+            margin: 8px 0;
+            line-height: 1.5;
+            color: #555;
+        }
+        .result-item p strong {
+            color: #333;
+            min-width: 110px; /* Align keys */
+            display: inline-block;
+        }
+        .error {
+            color: #e74c3c;
+            font-weight: bold;
+            background-color: #fdeded;
+            border: 1px solid #e74c3c;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .search-again {
+            display: block;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .no-results {
+             text-align: center;
+             font-size: 1.1em;
+             color: #7f8c8d;
+             margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Results for "{{ name }}" {% if year %}(Year: {{ year }}){% else %}(All Years){% endif %}</h1>
+        <p class="search-again"><a href="{{ url_for('index') }}">Search again</a></p>
+
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% elif results %}
+            <h2>Found {{ results | length }} result(s):</h2>
+            {% for item in results %}
+                <div class="result-item">
+                    <h3>{{ item.event.name }} ({{ item.event.displayDate }})</h3>
+                    <p><strong>Race:</strong> {{ item.race.name }}</p>
+                    <p><strong>Distance:</strong> {{ item.classification.displayDistance }} km</p>
+                     <p><strong>Category:</strong> {{ item.classification.category }}</p>
+                    <p><strong>Bib:</strong> {{ item.classification.bib }}</p>
+                    <p><strong>Chip Time:</strong> {{ item.classification.chipTime }}</p>
+                    <p><strong>Gun Time:</strong> {{ item.classification.gunTime }}</p>
+                    <p><strong>Overall Rank:</strong> {{ item.classification.rank }}</p>
+                    <p><strong>Gender Rank:</strong> {{ item.classification.genderRank }}</p>
+                    <p><strong>Category Rank:</strong> {{ item.classification.categoryRank }}</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="no-results">No results found for "{{ name }}" {% if year %}in {{ year }}{% else %}for the specified criteria{% endif %}.</p>
+        {% endif %}
+    </div>
+</body>
+</html> 
