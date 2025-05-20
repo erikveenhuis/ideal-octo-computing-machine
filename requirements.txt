@@ -1,2 +1,4 @@
 Flask>=2.0
-requests>=2.20 
+requests>=2.20
+beautifulsoup4>=4.9.3
+lxml>=4.9.0 

@@ -37,7 +37,7 @@
         input[type="number"] {
             padding: 12px;
             margin-bottom: 20px;
-            width: calc(100% - 24px); /* Account for padding */
+            width: calc(100% - 24px);
             border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 1rem;
@@ -51,24 +51,78 @@
             border-radius: 4px;
             font-size: 1rem;
             transition: background-color 0.2s ease;
-            width: 100%; /* Make button full width */
-            box-sizing: border-box; /* Include padding in width */
+            width: 100%;
+            box-sizing: border-box;
         }
         button:hover {
             background-color: #2980b9;
+        }
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading-spinner.active {
+            display: block;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            margin: 0 auto;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .loading-text {
+            margin-top: 10px;
+            color: #666;
+            font-size: 1.1em;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Find Runner Results</h1>
-        <form action="{{ url_for('search') }}" method="GET">
+        <form id="searchForm" onsubmit="return handleSubmit(event)">
             <label for="name">Enter Athlete Name:</label>
             <input type="text" id="name" name="name" required>
             <label for="year">Enter Year (optional):</label>
             <input type="number" id="year" name="year" placeholder="e.g., 2024">
             <button type="submit">Search</button>
         </form>
+        <div id="loadingSpinner" class="loading-spinner">
+            <div class="spinner"></div>
+            <div class="loading-text">Searching for results...</div>
+        </div>
     </div>
+
+    <script>
+        function handleSubmit(event) {
+            event.preventDefault();
+            
+            const form = event.target;
+            const name = form.querySelector('#name').value;
+            const year = form.querySelector('#year').value;
+            
+            // Show loading spinner
+            document.getElementById('loadingSpinner').classList.add('active');
+            
+            // Construct the search URL
+            let searchUrl = `/search?name=${encodeURIComponent(name)}`;
+            if (year) {
+                searchUrl += `&year=${encodeURIComponent(year)}`;
+            }
+            
+            // Redirect to search page
+            window.location.href = searchUrl;
+            
+            return false;
+        }
+    </script>
 </body>
 </html> 
