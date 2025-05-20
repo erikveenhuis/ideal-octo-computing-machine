@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPX Route Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        #map {
+            height: 600px;
+            margin-top: 20px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+        }
+        .upload-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+        }
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+        .success {
+            color: green;
+            margin-top: 10px;
+        }
+        .nav-links {
+            margin-bottom: 20px;
+        }
+        .nav-links a {
+            margin-right: 15px;
+            text-decoration: none;
+            color: #333;
+        }
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/gpx">GPX Viewer</a>
+        </div>
+        
+        <h1>GPX Route Viewer</h1>
+        
+        <div class="upload-section">
+            <h2>Upload GPX File</h2>
+            <form id="uploadForm">
+                <input type="file" id="gpxFile" accept=".gpx" required>
+                <button type="submit">Upload and Display</button>
+            </form>
+            <div id="message"></div>
+        </div>
+        
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([52.3676, 4.9041], 13); // Default to Amsterdam
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(map);
+
+        let currentRoute = null;
+
+        // Handle form submission
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('gpxFile');
+            const messageDiv = document.getElementById('message');
+            
+            if (!fileInput.files.length) {
+                messageDiv.className = 'error';
+                messageDiv.textContent = 'Please select a file';
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('gpx_file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/upload-gpx', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    messageDiv.className = 'error';
+                    messageDiv.textContent = data.error;
+                    return;
+                }
+
+                // Remove previous route if exists
+                if (currentRoute) {
+                    map.removeLayer(currentRoute);
+                }
+
+                // Create polyline from track points
+                const points = data.track_points.map(point => [point.lat, point.lon]);
+                currentRoute = L.polyline(points, {
+                    color: 'red',
+                    weight: 3,
+                    opacity: 0.7
+                }).addTo(map);
+
+                // Fit map to show the entire route
+                map.fitBounds(currentRoute.getBounds());
+
+                messageDiv.className = 'success';
+                messageDiv.textContent = 'Route loaded successfully!';
+            } catch (error) {
+                messageDiv.className = 'error';
+                messageDiv.textContent = 'Error loading GPX file: ' + error.message;
+            }
+        });
+    </script>
+</body>
+</html> 

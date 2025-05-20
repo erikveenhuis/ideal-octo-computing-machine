@@ -1,9 +1,11 @@
 # app.py
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 import requests
 import urllib.parse
 import os
 from bs4 import BeautifulSoup
+import gpxpy
+import gpxpy.gpx
 
 app = Flask(__name__)
 
@@ -182,6 +184,45 @@ def search():
         return render_template('results.html', name=name, year=year, results=all_results)
     except Exception as e:
         return render_template('results.html', name=name, year=year, error=str(e))
+
+@app.route('/gpx')
+def gpx_upload():
+    """Renders the GPX upload page."""
+    return render_template('gpx.html')
+
+@app.route('/upload-gpx', methods=['POST'])
+def upload_gpx():
+    """Handles GPX file upload and returns the track data."""
+    if 'gpx_file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['gpx_file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not file.filename.endswith('.gpx'):
+        return jsonify({'error': 'File must be a GPX file'}), 400
+    
+    try:
+        gpx = gpxpy.parse(file)
+        track_points = []
+        
+        for track in gpx.tracks:
+            for segment in track.segments:
+                for point in segment.points:
+                    track_points.append({
+                        'lat': point.latitude,
+                        'lon': point.longitude,
+                        'elevation': point.elevation,
+                        'time': point.time.isoformat() if point.time else None
+                    })
+        
+        return jsonify({
+            'success': True,
+            'track_points': track_points
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
     # Ensure the templates directory exists

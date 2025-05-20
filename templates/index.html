@@ -53,6 +53,7 @@
             transition: background-color 0.2s ease;
             width: 100%;
             box-sizing: border-box;
+            margin-bottom: 15px;
         }
         button:hover {
             background-color: #2980b9;
@@ -79,6 +80,26 @@
             color: #666;
             font-size: 1.1em;
         }
+        .divider {
+            text-align: center;
+            margin: 20px 0;
+            position: relative;
+        }
+        .divider::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background-color: #ddd;
+        }
+        .divider span {
+            background-color: #fff;
+            padding: 0 10px;
+            color: #666;
+            position: relative;
+        }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -95,6 +116,11 @@
             <input type="number" id="year" name="year" placeholder="e.g., 2024">
             <button type="submit">Search</button>
         </form>
+        
+        <div class="divider"><span>or</span></div>
+        
+        <button onclick="window.location.href='/gpx'" style="background-color: #27ae60;">View GPX Routes</button>
+        
         <div id="loadingSpinner" class="loading-spinner">
             <div class="spinner"></div>
             <div class="loading-text">Searching for results...</div>
