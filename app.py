@@ -332,18 +332,26 @@ def github_webhook():
                 venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
                 pip_path = os.path.join(venv_path, 'bin/pip')
                 
+                print(f"Using pip from: {pip_path}")
+                print(f"Current PATH: {os.environ.get('PATH', '')}")
+                
                 # Ensure we're in the correct directory
                 os.chdir('/home/erikveenhuis/my-flask-app')
                 print(f"Changed to directory: {os.getcwd()}")
+                
+                # Set up environment variables
+                env = os.environ.copy()
+                env['PATH'] = os.path.join(venv_path, 'bin') + ':' + env.get('PATH', '')
+                env['VIRTUAL_ENV'] = venv_path
+                
+                print(f"Updated PATH: {env['PATH']}")
+                print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
                 
                 # Install dependencies using the virtual environment's pip
                 pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
-                                         env={
-                                             'PATH': os.path.join(venv_path, 'bin') + ':' + os.environ.get('PATH', ''),
-                                             'VIRTUAL_ENV': venv_path
-                                         })
+                                         env=env)
                 print(f"Pip install output: {pip_result.stdout}")
                 if pip_result.stderr:
                     print(f"Pip install errors: {pip_result.stderr}")
@@ -367,8 +375,10 @@ def github_webhook():
                         print(f"WSGI file owner: {stat.st_uid}")
                         print(f"WSGI file group: {stat.st_gid}")
                         
-                        # Try to touch the file
-                        subprocess.run(['touch', wsgi_file], 
+                        # Try to touch the file using the full path to touch
+                        touch_path = '/usr/bin/touch'
+                        print(f"Using touch from: {touch_path}")
+                        subprocess.run([touch_path, wsgi_file], 
                                     capture_output=True, 
                                     text=True)
                         print("Successfully touched WSGI file")
