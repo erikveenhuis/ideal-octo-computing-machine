@@ -3,88 +3,88 @@
 {% block title %}Results for {{ name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
-    <h1 class="text-3xl font-bold text-center mb-4">Results for "{{ name }}" {% if year %}(Year: {{ year }}){% else %}(All Years){% endif %}</h1>
+<div class="max-w-4xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+    <h1 class="text-3xl font-bold text-center mb-4 text-gray-900 dark:text-white">Results for "{{ name }}" {% if year %}(Year: {{ year }}){% else %}(All Years){% endif %}</h1>
     <p class="text-center mb-8">
-        <a href="{{ url_for('index') }}" class="text-blue-600 hover:text-blue-800">Search again</a>
+        <a href="{{ url_for('index') }}" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">Search again</a>
     </p>
 
     <div id="loadingSpinner" class="flex flex-col items-center justify-center py-8">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <div class="mt-2 text-gray-600">Gathering results from Sporthive and Uitslagen.nl...</div>
+        <div class="mt-2 text-gray-600 dark:text-gray-400">Gathering results from Sporthive and Uitslagen.nl...</div>
     </div>
 
     <div id="resultsContainer" class="hidden">
         {% if error %}
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+            <div class="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded relative mb-4">
                 {{ error }}
             </div>
         {% endif %}
 
         {% if results %}
             {% for item in results %}
-                <div class="border border-gray-200 rounded-lg p-6 mb-6 bg-white shadow-sm">
+                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6 bg-white dark:bg-gray-800 shadow-sm">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-xl font-semibold text-blue-600">
+                        <h3 class="text-xl font-semibold text-blue-600 dark:text-blue-400">
                             {{ item.event.name }} ({{ item.event.date }})
                         </h3>
                         <span class="px-3 py-1 rounded-full text-sm font-medium
                             {% if item.source == 'Sporthive' %}
-                                bg-blue-100 text-blue-800
+                                bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200
                             {% else %}
-                                bg-green-100 text-green-800
+                                bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200
                             {% endif %}">
                             {{ item.source }}
                         </span>
                     </div>
 
                     <div class="space-y-2">
-                        <p class="text-gray-700">
+                        <p class="text-gray-700 dark:text-gray-300">
                             <span class="font-medium">Race:</span> {{ item.race.name }}
                         </p>
 
                         {% if item.source == 'Sporthive' %}
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Distance:</span> {{ item.classification.displayDistance }} km
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Category:</span> {{ item.classification.category }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Bib:</span> {{ item.classification.bib }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Chip Time:</span> {{ item.classification.chipTime }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Gun Time:</span> {{ item.classification.gunTime }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Overall Rank:</span> {{ item.classification.rank }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Gender Rank:</span> {{ item.classification.genderRank }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Category Rank:</span> {{ item.classification.categoryRank }}
                             </p>
                         {% else %}
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Rank:</span> {{ item.classification.rank }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Name:</span> {{ item.classification.name }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Club:</span> {{ item.classification.club }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Gun Time:</span> {{ item.classification.gun_time }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Chip Time:</span> {{ item.classification.chip_time }}
                             </p>
-                            <p class="text-gray-700">
+                            <p class="text-gray-700 dark:text-gray-300">
                                 <span class="font-medium">Pace:</span> {{ item.classification.pace_kmh }} km/u ({{ item.classification.pace_minkm }} min/km)
                             </p>
                         {% endif %}
@@ -92,7 +92,7 @@
                 </div>
             {% endfor %}
         {% else %}
-            <p class="text-center text-gray-500 text-lg py-8">
+            <p class="text-center text-gray-500 dark:text-gray-400 text-lg py-8">
                 No results found for "{{ name }}" {% if year %}in {{ year }}{% else %}for the specified criteria{% endif %}.
             </p>
         {% endif %}
