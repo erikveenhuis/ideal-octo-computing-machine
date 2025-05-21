@@ -331,8 +331,10 @@ def github_webhook():
                 # Use the correct virtual environment
                 venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
                 python_path = os.path.join(venv_path, 'bin/python')
+                pip_path = os.path.join(venv_path, 'bin/pip')
                 
                 print(f"Using Python from: {python_path}")
+                print(f"Using pip from: {pip_path}")
                 print(f"Current PATH: {os.environ.get('PATH', '')}")
                 
                 # Ensure we're in the correct directory
@@ -343,12 +345,14 @@ def github_webhook():
                 env = os.environ.copy()
                 env['PATH'] = os.path.join(venv_path, 'bin') + ':' + env.get('PATH', '')
                 env['VIRTUAL_ENV'] = venv_path
+                env['PYTHONPATH'] = os.path.join(venv_path, 'lib/python3.13/site-packages')
                 
                 print(f"Updated PATH: {env['PATH']}")
                 print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
+                print(f"PYTHONPATH: {env['PYTHONPATH']}")
                 
-                # Install dependencies using the virtual environment's Python to run pip
-                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+                # Install dependencies using the virtual environment's pip directly
+                pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
                                          env=env)
