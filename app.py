@@ -325,14 +325,16 @@ def github_webhook():
                                  text=True)
             print(f"Git pull output: {result.stdout}")
             
-            # Install/update dependencies
+            # Install/updating dependencies
             print("Installing/updating dependencies...")
             try:
                 # Use the correct virtual environment
                 venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
                 python_path = os.path.join(venv_path, 'bin/python')
+                site_packages = os.path.join(venv_path, 'lib/python3.13/site-packages')
                 
                 print(f"Using Python from: {python_path}")
+                print(f"Installing to: {site_packages}")
                 print(f"Current PATH: {os.environ.get('PATH', '')}")
                 
                 # Ensure we're in the correct directory
@@ -343,14 +345,12 @@ def github_webhook():
                 env = os.environ.copy()
                 env['PATH'] = os.path.join(venv_path, 'bin') + ':' + env.get('PATH', '')
                 env['VIRTUAL_ENV'] = venv_path
-                env['PYTHONUSERBASE'] = venv_path  # Prevent user installations
                 
                 print(f"Updated PATH: {env['PATH']}")
                 print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
-                print(f"PYTHONUSERBASE: {env['PYTHONUSERBASE']}")
                 
-                # Install dependencies using Python's -m pip flag
-                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '--no-user', '-r', 'requirements.txt'],
+                # Install dependencies using --target to specify installation directory
+                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '--target', site_packages, '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
                                          env=env)
