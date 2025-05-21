@@ -330,9 +330,9 @@ def github_webhook():
             try:
                 # Use the correct virtual environment
                 venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
-                pip_path = os.path.join(venv_path, 'bin/pip')
+                python_path = os.path.join(venv_path, 'bin/python')
                 
-                print(f"Using pip from: {pip_path}")
+                print(f"Using Python from: {python_path}")
                 print(f"Current PATH: {os.environ.get('PATH', '')}")
                 
                 # Ensure we're in the correct directory
@@ -347,8 +347,8 @@ def github_webhook():
                 print(f"Updated PATH: {env['PATH']}")
                 print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
                 
-                # Install dependencies using the virtual environment's pip
-                pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
+                # Install dependencies using the virtual environment's Python to run pip
+                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
                                          env=env)
@@ -378,10 +378,13 @@ def github_webhook():
                         # Try to touch the file using the full path to touch
                         touch_path = '/usr/bin/touch'
                         print(f"Using touch from: {touch_path}")
-                        subprocess.run([touch_path, wsgi_file], 
-                                    capture_output=True, 
-                                    text=True)
-                        print("Successfully touched WSGI file")
+                        touch_result = subprocess.run([touch_path, wsgi_file], 
+                                                   capture_output=True, 
+                                                   text=True)
+                        if touch_result.returncode == 0:
+                            print("Successfully touched WSGI file")
+                        else:
+                            print(f"Failed to touch WSGI file. Error: {touch_result.stderr}")
                     except Exception as e:
                         print(f"Failed to touch WSGI file: {str(e)}")
                 else:
