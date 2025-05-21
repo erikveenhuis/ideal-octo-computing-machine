@@ -307,8 +307,16 @@ def github_webhook():
                     # Touch the WSGI file to trigger reload
                     wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
                     if os.path.exists(wsgi_file):
+                        # First touch the WSGI file to trigger reload
                         subprocess.run(['touch', wsgi_file], check=True)
                         print("Successfully touched WSGI file")
+                        
+                        # Wait a moment for the old workers to start shutting down
+                        time.sleep(2)
+                        
+                        # Touch again to ensure new workers start
+                        subprocess.run(['touch', wsgi_file], check=True)
+                        print("Touched WSGI file again to ensure new workers start")
                     else:
                         print(f"WSGI file not found at: {wsgi_file}")
                     
