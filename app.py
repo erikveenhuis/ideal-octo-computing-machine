@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
 import requests
 import urllib.parse
 import os
@@ -8,8 +8,21 @@ import gpxpy
 import gpxpy.gpx
 import hmac
 import hashlib
+import replicate
+import tempfile
+from PIL import Image
+import io
+import pillow_avif  # Ensure AVIF support is loaded
 
 app = Flask(__name__)
+
+# Configure Replicate API key
+REPLICATE_API_TOKEN = os.getenv('REPLICATE_API_TOKEN')
+if not REPLICATE_API_TOKEN:
+    print("Warning: REPLICATE_API_TOKEN environment variable is not set. Image transformation will not work.")
+    print("Please set your Replicate API token using: export REPLICATE_API_TOKEN=your_token_here")
+
+print("Available decoders after AVIF plugin import:", Image.OPEN.keys())
 
 def get_uitslagen_results(name):
     """Fetches results from uitslagen.nl for a given name."""
@@ -268,6 +281,108 @@ def github_webhook():
             return jsonify({'error': f'Failed to pull changes: {str(e)}'}), 500
     
     return jsonify({'message': 'Webhook received'}), 200
+
+@app.route('/image-transform')
+def image_transform():
+    """Renders the image transformation page."""
+    return render_template('image_transform.html')
+
+@app.route('/transform-image', methods=['POST'])
+def transform_image():
+    """Handles image upload and transformation."""
+    if not REPLICATE_API_TOKEN:
+        return jsonify({'error': 'Replicate API token not configured. Please set REPLICATE_API_TOKEN environment variable.'}), 500
+        
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    try:
+        # Read the file content into memory
+        file_content = file.read()
+        if not file_content:
+            return jsonify({'error': 'Empty file uploaded'}), 400
+
+        print(f"File content size: {len(file_content)} bytes")
+        print(f"File content type: {file.content_type}")
+        print(f"File name: {file.filename}")
+
+        # Create BytesIO objects for the conversion process
+        input_stream = io.BytesIO(file_content)
+        output_stream = io.BytesIO()
+        
+        try:
+            # Try to open and convert the image
+            print("Attempting to open image...")
+            img = Image.open(input_stream)
+            print(f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}")
+            
+            # Convert to RGB if necessary
+            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                print(f"Converting from {img.mode} to RGB")
+                img = img.convert('RGB')
+            
+            # Save as PNG to the output stream
+            print("Saving as PNG...")
+            img.save(output_stream, format='PNG')
+            output_stream.seek(0)  # Reset stream position to beginning
+            print(f"Output stream size: {len(output_stream.getvalue())} bytes")
+            
+            # Call Replicate API with latent-consistency-model
+            input = {
+                "seed": -1,
+                "image": output_stream,
+                "width": 768,
+                "height": 768,
+                "prompt": "pure white background, bright white background, solid white background, no gray, no shadows, no gradients, professional product photography, studio lighting, commercial product shot, high-end product photography, clean background, professional lighting setup, product centered, sharp focus, 8k resolution, studio quality, product showcase, maintain original product, preserve product details, keep original product exactly as is, only enhance background and lighting",
+                "num_images": 1,
+                "guidance_scale": 6,  # Increased to emphasize white background
+                "archive_outputs": False,
+                "prompt_strength": 0.4,  # Increased to allow more background change
+                "sizing_strategy": "input_image",
+                "lcm_origin_steps": 50,
+                "canny_low_threshold": 100,
+                "num_inference_steps": 4,
+                "canny_high_threshold": 200,
+                "control_guidance_end": 1,
+                "control_guidance_start": 0,
+                "controlnet_conditioning_scale": 2  # Reduced to allow more background change
+            }
+            
+            print("Calling Replicate API...")
+            output = replicate.run(
+                "fofr/latent-consistency-model:683d19dc312f7a9f0428b04429a9ccefd28dbf7785fef083ad5cf991b65f406f",
+                input=input
+            )
+            print("Replicate API response:", output)
+            
+            # The output is a list of URLs
+            if output and len(output) > 0:
+                # Convert the output to a string URL if it's not already
+                image_url = str(output[0])
+                print("Returning image URL:", image_url)
+                return jsonify({'image_url': image_url})
+            else:
+                return jsonify({'error': 'No output generated'}), 500
+                
+        except Exception as e:
+            print(f"Error processing image: {str(e)}")
+            print(f"File type: {file.content_type}")
+            print(f"File name: {file.filename}")
+            print("Full error details:")
+            import traceback
+            print(traceback.format_exc())
+            return jsonify({'error': f'Invalid image file. Please upload a valid image (JPEG, PNG, AVIF, etc.). Error: {str(e)}'}), 400
+            
+    except Exception as e:
+        print(f"Error during image transformation: {str(e)}")
+        import traceback
+        print("Full traceback:")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Ensure the templates directory exists

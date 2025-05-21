@@ -1,210 +1,116 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Results for {{ name }}</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f4f7f6;
-            color: #333;
-            display: flex;
-            justify-content: center;
-        }
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            background-color: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        h1 {
-            color: #2c3e50;
-            text-align: center;
-            margin-bottom: 15px;
-        }
-        h2 {
-            color: #34495e;
-            margin-top: 30px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 10px;
-        }
-        .result-item {
-            border: 1px solid #e0e0e0;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-radius: 6px;
-            background-color: #fdfdfd;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
-        }
-        .result-item h3 {
-            margin-top: 0;
-            margin-bottom: 15px;
-            color: #3498db;
-            font-size: 1.2em;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .result-item p {
-            margin: 8px 0;
-            line-height: 1.5;
-            color: #555;
-        }
-        .result-item p strong {
-            color: #333;
-            min-width: 110px;
-            display: inline-block;
-        }
-        .error {
-            color: #e74c3c;
-            font-weight: bold;
-            background-color: #fdeded;
-            border: 1px solid #e74c3c;
-            padding: 15px;
-            border-radius: 4px;
-            text-align: center;
-        }
-        a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        .search-again {
-            display: block;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 1.1em;
-        }
-        .no-results {
-            text-align: center;
-            font-size: 1.1em;
-            color: #7f8c8d;
-            margin-top: 40px;
-        }
-        .source-section {
-            margin-bottom: 40px;
-        }
-        .source-badge {
-            font-size: 0.8em;
-            padding: 4px 8px;
-            border-radius: 4px;
-            background-color: #e0e0e0;
-            color: #666;
-        }
-        .source-badge.sporthive {
-            background-color: #3498db;
-            color: white;
-        }
-        .source-badge.uitslagen {
-            background-color: #2ecc71;
-            color: white;
-        }
-        .loading-spinner {
-            display: none;
-            text-align: center;
-            margin: 40px 0;
-        }
-        .loading-spinner.active {
-            display: block;
-        }
-        .spinner {
-            width: 40px;
-            height: 40px;
-            margin: 0 auto;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        .loading-text {
-            margin-top: 10px;
-            color: #666;
-            font-size: 1.1em;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .results-container {
-            display: none;
-        }
-        .results-container.active {
-            display: block;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Results for "{{ name }}" {% if year %}(Year: {{ year }}){% else %}(All Years){% endif %}</h1>
-        <p class="search-again"><a href="{{ url_for('index') }}">Search again</a></p>
+{% extends "base.html" %}
 
-        <div id="loadingSpinner" class="loading-spinner active">
-            <div class="spinner"></div>
-            <div class="loading-text">Gathering results from Sporthive and Uitslagen.nl...</div>
-        </div>
+{% block title %}Results for {{ name }}{% endblock %}
 
-        <div id="resultsContainer" class="results-container">
-            {% if error %}
-                <p class="error">{{ error }}</p>
-            {% endif %}
+{% block content %}
+<div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
+    <h1 class="text-3xl font-bold text-center mb-4">Results for "{{ name }}" {% if year %}(Year: {{ year }}){% else %}(All Years){% endif %}</h1>
+    <p class="text-center mb-8">
+        <a href="{{ url_for('index') }}" class="text-blue-600 hover:text-blue-800">Search again</a>
+    </p>
 
-            {% if results %}
-                {% for item in results %}
-                    <div class="result-item">
-                        <h3>
-                            {{ item.event.name }} ({{ item.event.date }})
-                            <span class="source-badge {{ item.source.lower() }}">{{ item.source }}</span>
-                        </h3>
-                        <p><strong>Race:</strong> {{ item.race.name }}</p>
-                        {% if item.source == 'Sporthive' %}
-                            <p><strong>Distance:</strong> {{ item.classification.displayDistance }} km</p>
-                            <p><strong>Category:</strong> {{ item.classification.category }}</p>
-                            <p><strong>Bib:</strong> {{ item.classification.bib }}</p>
-                            <p><strong>Chip Time:</strong> {{ item.classification.chipTime }}</p>
-                            <p><strong>Gun Time:</strong> {{ item.classification.gunTime }}</p>
-                            <p><strong>Overall Rank:</strong> {{ item.classification.rank }}</p>
-                            <p><strong>Gender Rank:</strong> {{ item.classification.genderRank }}</p>
-                            <p><strong>Category Rank:</strong> {{ item.classification.categoryRank }}</p>
-                        {% else %}
-                            <p><strong>Rank:</strong> {{ item.classification.rank }}</p>
-                            <p><strong>Name:</strong> {{ item.classification.name }}</p>
-                            <p><strong>Club:</strong> {{ item.classification.club }}</p>
-                            <p><strong>Gun Time:</strong> {{ item.classification.gun_time }}</p>
-                            <p><strong>Chip Time:</strong> {{ item.classification.chip_time }}</p>
-                            <p><strong>Pace:</strong> {{ item.classification.pace_kmh }} km/u ({{ item.classification.pace_minkm }} min/km)</p>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            {% else %}
-                <p class="no-results">No results found for "{{ name }}" {% if year %}in {{ year }}{% else %}for the specified criteria{% endif %}.</p>
-            {% endif %}
-        </div>
+    <div id="loadingSpinner" class="flex flex-col items-center justify-center py-8">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <div class="mt-2 text-gray-600">Gathering results from Sporthive and Uitslagen.nl...</div>
     </div>
 
-    <script>
-        // Show loading spinner and hide results initially
-        document.addEventListener('DOMContentLoaded', function() {
-            const spinner = document.getElementById('loadingSpinner');
-            const resultsContainer = document.getElementById('resultsContainer');
-            
-            // Ensure spinner is visible and results are hidden
-            spinner.classList.add('active');
-            resultsContainer.classList.remove('active');
-            
-            // Hide spinner and show results after a short delay
-            setTimeout(function() {
-                spinner.classList.remove('active');
-                resultsContainer.classList.add('active');
-            }, 1000); // Increased delay to ensure spinner is visible
-        });
-    </script>
-</body>
-</html> 
+    <div id="resultsContainer" class="hidden">
+        {% if error %}
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+                {{ error }}
+            </div>
+        {% endif %}
+
+        {% if results %}
+            {% for item in results %}
+                <div class="border border-gray-200 rounded-lg p-6 mb-6 bg-white shadow-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold text-blue-600">
+                            {{ item.event.name }} ({{ item.event.date }})
+                        </h3>
+                        <span class="px-3 py-1 rounded-full text-sm font-medium
+                            {% if item.source == 'Sporthive' %}
+                                bg-blue-100 text-blue-800
+                            {% else %}
+                                bg-green-100 text-green-800
+                            {% endif %}">
+                            {{ item.source }}
+                        </span>
+                    </div>
+
+                    <div class="space-y-2">
+                        <p class="text-gray-700">
+                            <span class="font-medium">Race:</span> {{ item.race.name }}
+                        </p>
+
+                        {% if item.source == 'Sporthive' %}
+                            <p class="text-gray-700">
+                                <span class="font-medium">Distance:</span> {{ item.classification.displayDistance }} km
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Category:</span> {{ item.classification.category }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Bib:</span> {{ item.classification.bib }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Chip Time:</span> {{ item.classification.chipTime }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Gun Time:</span> {{ item.classification.gunTime }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Overall Rank:</span> {{ item.classification.rank }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Gender Rank:</span> {{ item.classification.genderRank }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Category Rank:</span> {{ item.classification.categoryRank }}
+                            </p>
+                        {% else %}
+                            <p class="text-gray-700">
+                                <span class="font-medium">Rank:</span> {{ item.classification.rank }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Name:</span> {{ item.classification.name }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Club:</span> {{ item.classification.club }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Gun Time:</span> {{ item.classification.gun_time }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Chip Time:</span> {{ item.classification.chip_time }}
+                            </p>
+                            <p class="text-gray-700">
+                                <span class="font-medium">Pace:</span> {{ item.classification.pace_kmh }} km/u ({{ item.classification.pace_minkm }} min/km)
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-center text-gray-500 text-lg py-8">
+                No results found for "{{ name }}" {% if year %}in {{ year }}{% else %}for the specified criteria{% endif %}.
+            </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const spinner = document.getElementById('loadingSpinner');
+        const resultsContainer = document.getElementById('resultsContainer');
+        
+        // Hide spinner and show results after a short delay
+        setTimeout(function() {
+            spinner.classList.add('hidden');
+            resultsContainer.classList.remove('hidden');
+        }, 1000);
+    });
+</script>
+{% endblock %} 
