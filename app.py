@@ -6,6 +6,8 @@ import os
 from bs4 import BeautifulSoup
 import gpxpy
 import gpxpy.gpx
+import hmac
+import hashlib
 
 app = Flask(__name__)
 
@@ -188,7 +190,7 @@ def search():
 @app.route('/gpx')
 def gpx_upload():
     """Renders the GPX upload page."""
-    return render_template('gpx.html')
+    return render_template('gpx.html', config={'STADIA_API_KEY': os.environ.get('STADIA_API_KEY')})
 
 @app.route('/upload-gpx', methods=['POST'])
 def upload_gpx():
@@ -223,6 +225,49 @@ def upload_gpx():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+def verify_github_webhook(payload, signature):
+    """Verify that the webhook request came from GitHub."""
+    if not signature:
+        return False
+    
+    # Get the secret from environment variable
+    secret = os.environ.get('GITHUB_WEBHOOK_SECRET')
+    if not secret:
+        return False
+    
+    # Calculate expected signature
+    expected_signature = 'sha1=' + hmac.new(
+        secret.encode('utf-8'),
+        payload,
+        hashlib.sha1
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
+
+@app.route('/webhook', methods=['POST'])
+def github_webhook():
+    """Handle GitHub webhook events."""
+    # Get the signature from the request headers
+    signature = request.headers.get('X-Hub-Signature')
+    
+    # Verify the signature
+    if not verify_github_webhook(request.get_data(), signature):
+        return jsonify({'error': 'Invalid signature'}), 401
+    
+    # Get the event type
+    event_type = request.headers.get('X-GitHub-Event')
+    
+    if event_type == 'push':
+        # Pull the latest changes
+        try:
+            import subprocess
+            subprocess.run(['git', 'pull'], check=True)
+            return jsonify({'message': 'Successfully pulled latest changes'}), 200
+        except subprocess.CalledProcessError as e:
+            return jsonify({'error': f'Failed to pull changes: {str(e)}'}), 500
+    
+    return jsonify({'message': 'Webhook received'}), 200
 
 if __name__ == '__main__':
     # Ensure the templates directory exists
