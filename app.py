@@ -341,10 +341,10 @@ def github_webhook():
             # Touch the WSGI file to trigger a reload
             # Try multiple possible WSGI file locations
             wsgi_locations = [
-                os.path.join(current_dir, 'wsgi.py'),
-                os.path.join(current_dir, 'passenger_wsgi.py'),
-                '/var/www/yourusername_pythonanywhere_com_wsgi.py',  # Default PythonAnywhere location
-                os.path.expanduser('~/yourusername.pythonanywhere.com/wsgi.py')  # User directory location
+                '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py',  # Main WSGI file
+                '/home/erikveenhuis/my-flask-app/wsgi.py',  # App directory WSGI
+                os.path.join(current_dir, 'wsgi.py'),  # Current directory
+                os.path.join(current_dir, 'passenger_wsgi.py')  # Passenger WSGI
             ]
             
             wsgi_touched = False
@@ -360,12 +360,14 @@ def github_webhook():
             
             if not wsgi_touched:
                 print("Warning: Could not find or touch any WSGI file")
-                # Try to find the WSGI file
-                print("Searching for WSGI files...")
-                for root, dirs, files in os.walk(current_dir):
-                    for file in files:
-                        if file.endswith('wsgi.py'):
-                            print(f"Found potential WSGI file: {os.path.join(root, file)}")
+                print("Attempting to touch main WSGI file directly...")
+                try:
+                    main_wsgi = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
+                    os.utime(main_wsgi, None)
+                    wsgi_touched = True
+                    print(f"Successfully touched main WSGI file: {main_wsgi}")
+                except Exception as e:
+                    print(f"Failed to touch main WSGI file: {str(e)}")
             
             return jsonify({
                 'message': 'Successfully pulled latest changes and attempted reload',
