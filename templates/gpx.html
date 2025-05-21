@@ -99,7 +99,8 @@
             <button id="toggleMarkers" class="toggle-button active">Show Start/Finish</button>
             <label style="margin-left:20px;">Route color: <input type="color" id="routeColor" value="#e74c3c" style="vertical-align:middle;"></label>
             <label style="margin-left:10px;">Start color: <input type="color" id="startColor" value="#2ecc71" style="vertical-align:middle;"></label>
-            <label style="margin-left:10px;">Finish color: <input type="color" id="finishColor" value="#e74c3c" style="vertical-align:middle;"></label>
+            <label style="margin-left:10px;">Finish color: <input type="color" id="finishColor" value="#ff0000" style="vertical-align:middle;"></label>
+            <label style="margin-left:10px;">Route width: <input type="number" id="routeWidth" value="5" min="1" max="20" style="width:50px;vertical-align:middle;"></label>
             <label style="margin-left:20px;">Map style:
                 <select id="mapStyle" style="vertical-align:middle;">
                     <option value="carto-light">CartoDB Light</option>
@@ -186,6 +187,7 @@
         let routeColor = document.getElementById('routeColor').value;
         let startColor = document.getElementById('startColor').value;
         let finishColor = document.getElementById('finishColor').value;
+        let routeWidth = parseInt(document.getElementById('routeWidth').value, 10);
 
         // Create custom icons for start and finish
         const startIcon = L.divIcon({
@@ -251,6 +253,11 @@
             updateMarkers();
         });
 
+        document.getElementById('routeWidth').addEventListener('input', function() {
+            routeWidth = parseInt(this.value, 10) || 1;
+            updateRouteWidth();
+        });
+
         function updateRouteColor() {
             if (currentRoute) {
                 currentRoute.setStyle({ color: routeColor });
@@ -273,6 +280,12 @@
                     iconSize: [12, 12],
                     iconAnchor: [6, 6]
                 }));
+            }
+        }
+
+        function updateRouteWidth() {
+            if (currentRoute) {
+                currentRoute.setStyle({ weight: routeWidth });
             }
         }
 
@@ -315,7 +328,7 @@
                 const points = data.track_points.map(point => [point.lat, point.lon]);
                 currentRoute = L.polyline(points, {
                     color: routeColor,
-                    weight: 3,
+                    weight: routeWidth,
                     opacity: 0.7
                 }).addTo(map);
 
