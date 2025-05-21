@@ -410,6 +410,21 @@ def transform_image():
             img = Image.open(input_stream)
             print(f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}")
             
+            # Apply EXIF orientation if present
+            try:
+                if hasattr(img, '_getexif') and img._getexif() is not None:
+                    exif = dict(img._getexif().items())
+                    if 274 in exif:  # 274 is the orientation tag
+                        orientation = exif[274]
+                        if orientation == 3:
+                            img = img.rotate(180, expand=True)
+                        elif orientation == 6:
+                            img = img.rotate(270, expand=True)
+                        elif orientation == 8:
+                            img = img.rotate(90, expand=True)
+            except Exception as e:
+                print(f"Warning: Could not process EXIF orientation: {e}")
+            
             # Convert to RGB if necessary
             if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
                 print(f"Converting from {img.mode} to RGB")
