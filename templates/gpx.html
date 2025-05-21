@@ -46,6 +46,36 @@
         .nav-links a:hover {
             text-decoration: underline;
         }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .toggle-button {
+            padding: 8px 16px;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        .toggle-button:hover {
+            background-color: #e0e0e0;
+        }
+        .toggle-button.active {
+            background-color: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+        .marker-info {
+            font-size: 12px;
+            padding: 4px 8px;
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
@@ -61,9 +91,24 @@
             <h2>Upload GPX File</h2>
             <form id="uploadForm">
                 <input type="file" id="gpxFile" accept=".gpx" required>
-                <button type="submit">Upload and Display</button>
             </form>
             <div id="message"></div>
+        </div>
+        
+        <div class="controls">
+            <button id="toggleMarkers" class="toggle-button active">Show Start/Finish</button>
+            <label style="margin-left:20px;">Route color: <input type="color" id="routeColor" value="#e74c3c" style="vertical-align:middle;"></label>
+            <label style="margin-left:10px;">Start color: <input type="color" id="startColor" value="#2ecc71" style="vertical-align:middle;"></label>
+            <label style="margin-left:10px;">Finish color: <input type="color" id="finishColor" value="#e74c3c" style="vertical-align:middle;"></label>
+            <label style="margin-left:20px;">Map style:
+                <select id="mapStyle" style="vertical-align:middle;">
+                    <option value="carto-light">CartoDB Light</option>
+                    <option value="osm">OpenStreetMap Standard</option>
+                    <option value="carto-dark">CartoDB Dark</option>
+                    <option value="stamen-toner" selected>Stamen Toner</option>
+                    <option value="stamen-terrain">Stamen Terrain</option>
+                </select>
+            </label>
         </div>
         
         <div id="map"></div>
@@ -71,20 +116,169 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Initialize the map
-        const map = L.map('map').setView([52.3676, 4.9041], 13); // Default to Amsterdam
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 19
-        }).addTo(map);
+        const STADIA_API_KEY = '609ac747-69d6-4090-93ce-ec7a3250c622';
+        const tileLayers = {
+            'carto-light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }),
+            'osm': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }),
+            'carto-dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }),
+            'stamen-toner': L.tileLayer(
+                `https://tiles.stadiamaps.com/tiles/stamen_toner/{z}/{x}/{y}{r}.png?api_key=${STADIA_API_KEY}`,
+                {
+                    attribution: 'Map tiles by Stamen Design, under CC BY 4.0. Data by OpenStreetMap, under ODbL.',
+                    maxZoom: 20
+                }
+            ),
+            'stamen-terrain': L.tileLayer(
+                `https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png?api_key=${STADIA_API_KEY}`,
+                {
+                    attribution: 'Map tiles by Stamen Design, under CC BY 4.0. Data by OpenStreetMap, under ODbL.',
+                    maxZoom: 18
+                }
+            )
+        };
+
+        // Initialize the map with default style
+        const map = L.map('map', {
+            center: [52.3676, 4.9041],
+            zoom: 13,
+            layers: [tileLayers['carto-light']]
+        });
+        let currentTileLayer = tileLayers['carto-light'];
+
+        // Map style switcher with error handling
+        document.getElementById('mapStyle').addEventListener('change', function() {
+            const selected = this.value;
+            if (tileLayers[selected]) {
+                map.removeLayer(currentTileLayer);
+                currentTileLayer = tileLayers[selected];
+                map.addLayer(currentTileLayer);
+            }
+        });
+
+        // Add error handling for tile loading
+        Object.values(tileLayers).forEach(layer => {
+            layer.on('tileerror', function(e) {
+                const messageDiv = document.getElementById('message');
+                messageDiv.className = 'error';
+                messageDiv.textContent = 'This map style could not be loaded. Falling back to CartoDB Light.';
+                map.removeLayer(currentTileLayer);
+                currentTileLayer = tileLayers['carto-light'];
+                map.addLayer(currentTileLayer);
+                document.getElementById('mapStyle').value = 'carto-light';
+            });
+        });
 
         let currentRoute = null;
+        let startMarker = null;
+        let finishMarker = null;
+        let showMarkers = true;
+        let routeColor = document.getElementById('routeColor').value;
+        let startColor = document.getElementById('startColor').value;
+        let finishColor = document.getElementById('finishColor').value;
 
-        // Handle form submission
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const fileInput = document.getElementById('gpxFile');
+        // Create custom icons for start and finish
+        const startIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="background-color: #2ecc71; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [12, 12],
+            iconAnchor: [6, 6]
+        });
+
+        const finishIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="background-color: #e74c3c; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [12, 12],
+            iconAnchor: [6, 6]
+        });
+
+        // Toggle markers button handler
+        document.getElementById('toggleMarkers').addEventListener('click', function() {
+            showMarkers = !showMarkers;
+            this.classList.toggle('active');
+            
+            if (currentRoute) {
+                if (showMarkers) {
+                    const points = currentRoute.getLatLngs();
+                    if (points.length > 0) {
+                        startMarker = L.marker(points[0], { icon: L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        }) })
+                        .bindPopup('Start')
+                        .addTo(map);
+                        finishMarker = L.marker(points[points.length - 1], { icon: L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        }) })
+                        .bindPopup('Finish')
+                        .addTo(map);
+                    }
+                } else {
+                    if (startMarker) map.removeLayer(startMarker);
+                    if (finishMarker) map.removeLayer(finishMarker);
+                    startMarker = null;
+                    finishMarker = null;
+                }
+            }
+        });
+
+        // Update color pickers
+        document.getElementById('routeColor').addEventListener('input', function() {
+            routeColor = this.value;
+            updateRouteColor();
+        });
+        document.getElementById('startColor').addEventListener('input', function() {
+            startColor = this.value;
+            updateMarkers();
+        });
+        document.getElementById('finishColor').addEventListener('input', function() {
+            finishColor = this.value;
+            updateMarkers();
+        });
+
+        function updateRouteColor() {
+            if (currentRoute) {
+                currentRoute.setStyle({ color: routeColor });
+            }
+        }
+
+        function updateMarkers() {
+            if (startMarker) {
+                startMarker.setIcon(L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                }));
+            }
+            if (finishMarker) {
+                finishMarker.setIcon(L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                }));
+            }
+        }
+
+        // Handle file selection and upload immediately
+        document.getElementById('gpxFile').addEventListener('change', async (e) => {
+            const fileInput = e.target;
             const messageDiv = document.getElementById('message');
             
             if (!fileInput.files.length) {
@@ -110,21 +304,41 @@
                     return;
                 }
 
-                // Remove previous route if exists
                 if (currentRoute) {
                     map.removeLayer(currentRoute);
                 }
+                if (startMarker) map.removeLayer(startMarker);
+                if (finishMarker) map.removeLayer(finishMarker);
+                startMarker = null;
+                finishMarker = null;
 
-                // Create polyline from track points
                 const points = data.track_points.map(point => [point.lat, point.lon]);
                 currentRoute = L.polyline(points, {
-                    color: 'red',
+                    color: routeColor,
                     weight: 3,
                     opacity: 0.7
                 }).addTo(map);
 
-                // Fit map to show the entire route
                 map.fitBounds(currentRoute.getBounds());
+
+                if (showMarkers && points.length > 0) {
+                    startMarker = L.marker(points[0], { icon: L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    }) })
+                    .bindPopup('Start')
+                    .addTo(map);
+                    finishMarker = L.marker(points[points.length - 1], { icon: L.divIcon({
+                        className: 'custom-div-icon',
+                        html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    }) })
+                    .bindPopup('Finish')
+                    .addTo(map);
+                }
 
                 messageDiv.className = 'success';
                 messageDiv.textContent = 'Route loaded successfully!';
@@ -133,6 +347,12 @@
                 messageDiv.textContent = 'Error loading GPX file: ' + error.message;
             }
         });
+
+        // Set map style to Stamen Toner by default
+        document.getElementById('mapStyle').value = 'stamen-toner';
+        map.removeLayer(currentTileLayer);
+        currentTileLayer = tileLayers['stamen-toner'];
+        map.addLayer(currentTileLayer);
     </script>
 </body>
 </html> 
