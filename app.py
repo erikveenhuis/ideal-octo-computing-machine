@@ -38,7 +38,8 @@ def get_uitslagen_results(name):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        # Increase timeout to 30 seconds
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         
         # Parse the HTML content
@@ -49,70 +50,51 @@ def get_uitslagen_results(name):
         result_sections = soup.find_all('div', class_='zk-kader')
         print(f"Found {len(result_sections)} result sections")
         
+        # Process each result section
         for section in result_sections:
-            # Get the table
-            table = section.find('table', class_='uitslag')
-            if not table:
+            try:
+                # Extract event details
+                event_name = section.find('h3').text.strip()
+                event_date = section.find('div', class_='zk-datum').text.strip()
+                
+                # Extract race details
+                race_name = section.find('div', class_='zk-afstand').text.strip()
+                
+                # Extract classification details
+                classification = {}
+                classification_rows = section.find_all('tr')
+                for row in classification_rows:
+                    cells = row.find_all('td')
+                    if len(cells) >= 2:
+                        key = cells[0].text.strip().lower().replace(' ', '_')
+                        value = cells[1].text.strip()
+                        classification[key] = value
+                
+                # Add to results if we have the minimum required data
+                if event_name and event_date and race_name:
+                    results.append({
+                        'event': {
+                            'name': event_name,
+                            'date': event_date
+                        },
+                        'race': {
+                            'name': race_name
+                        },
+                        'classification': classification
+                    })
+            except Exception as e:
+                print(f"Error processing result section: {str(e)}")
                 continue
-                
-            # Get event name and date from the first row
-            event_row = table.find('tr', class_='zk-evnm')
-            if not event_row:
-                continue
-                
-            event_info = event_row.find('th', colspan='6')
-            if not event_info:
-                continue
-                
-            event_text = event_info.text.strip()
-            # Split date and name
-            date_end = event_text.find(' ')
-            if date_end == -1:
-                continue
-                
-            event_date = event_text[:date_end]
-            event_name = event_text[date_end:].strip()
-            
-            # Get race category from the db row
-            category_row = table.find('tr', class_='db')
-            race_category = category_row.text.strip() if category_row else ''
-            
-            # Get the result row (skip header rows)
-            result_row = table.find('tr', class_='lb').find_next_sibling('tr')
-            if not result_row:
-                continue
-                
-            cols = result_row.find_all('td')
-            if len(cols) >= 7:
-                # Clean up the pace values by removing the units
-                pace_kmh = cols[5].text.strip().replace(' km/u', '').strip()
-                pace_minkm = cols[6].text.strip().replace(' min/km', '').strip()
-                
-                result = {
-                    'event': {
-                        'name': event_name,
-                        'date': event_date
-                    },
-                    'race': {
-                        'name': race_category
-                    },
-                    'classification': {
-                        'rank': cols[0].text.strip(),
-                        'name': cols[1].text.strip(),
-                        'club': cols[2].text.strip(),
-                        'gun_time': cols[3].text.strip(),
-                        'chip_time': cols[4].text.strip(),
-                        'pace_kmh': pace_kmh,
-                        'pace_minkm': pace_minkm
-                    }
-                }
-                results.append(result)
         
         return results
+    except requests.exceptions.Timeout:
+        print("Timeout while fetching data from uitslagen.nl")
+        return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data from uitslagen.nl: {str(e)}")
+        return []
     except Exception as e:
-        print(f"Error fetching data from uitslagen.nl: {e}")
-        import traceback
-        print(traceback.format_exc())
+        print(f"Unexpected error in get_uitslagen_results: {str(e)}")
         return []
 
 def get_sporthive_results(name, year=None):
