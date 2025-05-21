@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Image Transformation{% endblock %}
+{% block title %}Image Transform - Race Results{% endblock %}
 
 {% block extra_head %}
 <script src="https://unpkg.com/dropzone@5/dist/min/dropzone.min.js"></script>
@@ -8,42 +8,37 @@
 {% endblock %}
 
 {% block content %}
-<h1 class="text-3xl font-bold text-center mb-8">Professional Product Image Generator</h1>
-
-<div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
-    <div class="mb-6">
-        <h2 class="text-xl font-semibold mb-4">Upload or Take a Photo</h2>
-        <form action="/transform-image" method="post" enctype="multipart/form-data" class="dropzone" id="imageDropzone">
-            <div class="fallback">
-                <input name="file" type="file" accept="image/*" capture="environment" />
-            </div>
-        </form>
-    </div>
-
-    <div id="preview" class="hidden">
-        <h3 class="text-lg font-semibold mb-4">Preview</h3>
-        <div class="grid grid-cols-2 gap-4">
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-8">Transform Product Images</h1>
+    
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+        <form id="transformForm" class="space-y-6">
             <div>
-                <h4 class="text-sm font-medium mb-2">Original Image</h4>
-                <img id="originalPreview" class="w-full h-64 object-contain border rounded-lg" />
+                <label for="imageFile" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Select Image</label>
+                <input type="file" id="imageFile" accept="image/*" required
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
             </div>
-            <div>
-                <h4 class="text-sm font-medium mb-2">Transformed Image</h4>
-                <div id="transformedPreview" class="w-full h-64 border rounded-lg flex items-center justify-center bg-gray-50">
-                    <p class="text-gray-500">Transformed image will appear here</p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Original Image</h3>
+                    <img id="originalPreview" class="w-full h-64 object-contain border rounded-lg dark:border-gray-600" />
+                </div>
+                
+                <div>
+                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Transformed Image</h3>
+                    <div id="transformedPreview" class="w-full h-64 border rounded-lg dark:border-gray-600 flex items-center justify-center bg-gray-50 dark:bg-gray-700">
+                        <p class="text-gray-500 dark:text-gray-400">Transformed image will appear here</p>
+                    </div>
                 </div>
             </div>
-        </div>
+            
+            <button type="submit"
+                class="w-full bg-blue-600 dark:bg-blue-700 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
+                Transform Image
+            </button>
+        </form>
     </div>
-
-    <div id="loading" class="hidden mt-4">
-        <div class="flex items-center justify-center">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span class="ml-2">Transforming image...</span>
-        </div>
-    </div>
-
-    <div id="error" class="hidden mt-4 p-4 bg-red-100 text-red-700 rounded-lg"></div>
 </div>
 {% endblock %}
 
@@ -88,6 +83,55 @@
                 document.getElementById('originalPreview').src = '';
                 document.getElementById('transformedPreview').innerHTML = '<p class="text-gray-500">Transformed image will appear here</p>';
             });
+        }
+    });
+
+    // Preview original image
+    document.getElementById('imageFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('originalPreview').src = e.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Handle form submission
+    document.getElementById('transformForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const fileInput = document.getElementById('imageFile');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            alert('Please select an image file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const response = await fetch('/transform-image', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            
+            // Display transformed image
+            document.getElementById('transformedPreview').innerHTML = `<img src="${data.image_url}" class="w-full h-64 object-contain" />`;
+            
+        } catch (error) {
+            console.error('Error:', error);
+            alert('An error occurred while transforming the image');
         }
     });
 </script>

@@ -1,82 +1,46 @@
 {% extends "base.html" %}
 
-{% block title %}Search Runner Results{% endblock %}
+{% block title %}Home - Race Results{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
-    <h1 class="text-3xl font-bold text-center mb-8">Find Runner Results</h1>
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-8">Race Results Search</h1>
     
-    <form id="searchForm" onsubmit="return handleSubmit(event)" class="space-y-4">
+    <form action="/search" method="get" class="space-y-4">
         <div>
-            <label for="name" class="block text-sm font-medium text-gray-700 mb-2">Enter Athlete Name:</label>
+            <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
             <input type="text" id="name" name="name" required
-                class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
         </div>
         
         <div>
-            <label for="year" class="block text-sm font-medium text-gray-700 mb-2">Enter Year (optional):</label>
-            <input type="number" id="year" name="year" placeholder="e.g., 2024"
-                class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+            <label for="year" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Year (optional)</label>
+            <input type="number" id="year" name="year" min="1900" max="2100"
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
         </div>
         
-        <button type="submit" 
-            class="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+        <button type="submit"
+            class="w-full bg-blue-600 dark:bg-blue-700 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
             Search
         </button>
     </form>
     
-    <div class="relative my-8">
-        <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-gray-300"></div>
-        </div>
-        <div class="relative flex justify-center text-sm">
-            <span class="px-2 bg-white text-gray-500">or</span>
-        </div>
-    </div>
-    
-    <div class="space-y-4">
-        <a href="/gpx" 
-            class="block w-full bg-green-600 text-white text-center px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">
-            View GPX Routes
-        </a>
+    <div class="mt-8">
+        <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
         
-        <a href="/image-transform" 
-            class="block w-full bg-purple-600 text-white text-center px-4 py-2 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2">
-            Transform Product Images
-        </a>
-    </div>
-    
-    <div id="loadingSpinner" class="hidden mt-6">
-        <div class="flex items-center justify-center">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span class="ml-2 text-gray-600">Searching for results...</span>
+        <div class="mt-8 space-y-4">
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Quick Links</h2>
+            
+            <a href="/gpx"
+                class="block w-full bg-green-600 dark:bg-green-700 text-white text-center px-4 py-2 rounded-md hover:bg-green-700 dark:hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
+                GPX Upload
+            </a>
+            
+            <a href="/image-transform"
+                class="block w-full bg-purple-600 dark:bg-purple-700 text-white text-center px-4 py-2 rounded-md hover:bg-purple-700 dark:hover:bg-purple-800 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
+                Image Transform
+            </a>
         </div>
     </div>
 </div>
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-    function handleSubmit(event) {
-        event.preventDefault();
-        
-        const form = event.target;
-        const name = form.querySelector('#name').value;
-        const year = form.querySelector('#year').value;
-        
-        // Show loading spinner
-        document.getElementById('loadingSpinner').classList.remove('hidden');
-        
-        // Construct the search URL
-        let searchUrl = `/search?name=${encodeURIComponent(name)}`;
-        if (year) {
-            searchUrl += `&year=${encodeURIComponent(year)}`;
-        }
-        
-        // Redirect to search page
-        window.location.href = searchUrl;
-        
-        return false;
-    }
-</script>
 {% endblock %} 
