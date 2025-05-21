@@ -263,138 +263,75 @@ def verify_github_webhook(payload, signature):
 @app.route('/webhook', methods=['POST'])
 def github_webhook():
     """Handle GitHub webhook events."""
-    # Get the signature from the request headers
-    signature = request.headers.get('X-Hub-Signature')
-    
-    # Verify the signature
-    if not verify_github_webhook(request.get_data(), signature):
-        return jsonify({'error': 'Invalid signature'}), 401
-    
-    # Get the event type
-    event_type = request.headers.get('X-GitHub-Event')
-    
-    if event_type == 'push':
-        try:
-            # Get the current working directory
-            current_dir = os.getcwd()
-            print(f"Current working directory: {current_dir}")
+    try:
+        # Get the signature from the request headers
+        signature = request.headers.get('X-Hub-Signature')
+        
+        # Verify the signature
+        if not verify_github_webhook(request.get_data(), signature):
+            return jsonify({'error': 'Invalid signature'}), 401
+        
+        # Get the event type
+        event_type = request.headers.get('X-GitHub-Event')
+        
+        if event_type == 'push':
+            # Start with a quick response to prevent timeout
+            response = jsonify({
+                'message': 'Webhook received, starting deployment process',
+                'status': 'processing'
+            })
             
-            # Print git status and configuration
-            print("Checking git status...")
-            status_result = subprocess.run(['git', 'status'], 
-                                        capture_output=True, 
-                                        text=True)
-            print(f"Git status output: {status_result.stdout}")
+            # Run the deployment process in a separate thread
+            def deploy_process():
+                try:
+                    # Get the current working directory
+                    current_dir = os.getcwd()
+                    print(f"Current working directory: {current_dir}")
+                    
+                    # Ensure we're in the correct directory
+                    if not os.path.exists(os.path.join(current_dir, '.git')):
+                        print("Not in a git repository, attempting to find it...")
+                        parent_dir = os.path.dirname(current_dir)
+                        while parent_dir != current_dir:
+                            if os.path.exists(os.path.join(parent_dir, '.git')):
+                                print(f"Found git repository in: {parent_dir}")
+                                os.chdir(parent_dir)
+                                break
+                            parent_dir = os.path.dirname(parent_dir)
+                    
+                    # Quick git operations
+                    print("Fetching and resetting...")
+                    subprocess.run(['git', 'fetch', '--all'], check=True, capture_output=True)
+                    subprocess.run(['git', 'reset', '--hard', 'origin/main'], check=True, capture_output=True)
+                    
+                    # Touch the WSGI file to trigger reload
+                    wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
+                    if os.path.exists(wsgi_file):
+                        subprocess.run(['touch', wsgi_file], check=True)
+                        print("Successfully touched WSGI file")
+                    else:
+                        print(f"WSGI file not found at: {wsgi_file}")
+                    
+                except Exception as e:
+                    print(f"Deployment error: {str(e)}")
+                    import traceback
+                    print(traceback.format_exc())
             
-            print("Checking git remote...")
-            remote_result = subprocess.run(['git', 'remote', '-v'], 
-                                        capture_output=True, 
-                                        text=True)
-            print(f"Git remote output: {remote_result.stdout}")
+            # Start the deployment process in a background thread
+            import threading
+            thread = threading.Thread(target=deploy_process)
+            thread.daemon = True
+            thread.start()
             
-            # Ensure we're in the correct directory
-            if not os.path.exists(os.path.join(current_dir, '.git')):
-                print("Not in a git repository, attempting to find it...")
-                # Try to find the git repository in parent directories
-                parent_dir = os.path.dirname(current_dir)
-                while parent_dir != current_dir:
-                    if os.path.exists(os.path.join(parent_dir, '.git')):
-                        print(f"Found git repository in: {parent_dir}")
-                        os.chdir(parent_dir)
-                        break
-                    parent_dir = os.path.dirname(parent_dir)
+            return response, 200
             
-            # Fetch all changes first
-            print("Fetching all changes...")
-            fetch_result = subprocess.run(['git', 'fetch', '--all'], 
-                                       capture_output=True, 
-                                       text=True)
-            print(f"Git fetch output: {fetch_result.stdout}")
-            
-            # Reset to origin/main (or your default branch)
-            print("Resetting to origin/main...")
-            reset_result = subprocess.run(['git', 'reset', '--hard', 'origin/main'], 
-                                       capture_output=True, 
-                                       text=True)
-            print(f"Git reset output: {reset_result.stdout}")
-            
-            # Pull the latest changes
-            print("Pulling latest changes...")
-            result = subprocess.run(['git', 'pull'], 
-                                 capture_output=True, 
-                                 text=True)
-            print(f"Git pull output: {result.stdout}")
-            
-            # Install/updating dependencies
-            print("Installing/updating dependencies...")
-            try:
-                # Use the correct virtual environment
-                venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
-                python_path = os.path.join(venv_path, 'bin/python')
-                site_packages = os.path.join(venv_path, 'lib/python3.13/site-packages')
-                
-                print(f"Using Python from: {python_path}")
-                print(f"Installing to: {site_packages}")
-                print(f"Current PATH: {os.environ.get('PATH', '')}")
-                
-                # Ensure we're in the correct directory
-                os.chdir('/home/erikveenhuis/my-flask-app')
-                print(f"Changed to directory: {os.getcwd()}")
-                
-                # Set up environment variables
-                env = os.environ.copy()
-                env['PATH'] = os.path.join(venv_path, 'bin') + ':' + env.get('PATH', '')
-                env['VIRTUAL_ENV'] = venv_path
-                
-                print(f"Updated PATH: {env['PATH']}")
-                print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
-                
-                # Install dependencies using --target to specify installation directory
-                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '--target', site_packages, '-r', 'requirements.txt'],
-                                         capture_output=True,
-                                         text=True,
-                                         env=env)
-                print(f"Pip install output: {pip_result.stdout}")
-                if pip_result.stderr:
-                    print(f"Pip install errors: {pip_result.stderr}")
-            except Exception as e:
-                print(f"Failed to install dependencies: {str(e)}")
-            
-            # Reload the application
-            print("Attempting to reload the application...")
-            try:
-                # Use the exact WSGI file path
-                wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
-                print(f"Attempting to touch WSGI file: {wsgi_file}")
-                
-                # Try to touch the file using the full path to touch
-                touch_path = '/usr/bin/touch'
-                print(f"Using touch from: {touch_path}")
-                touch_result = subprocess.run([touch_path, wsgi_file], 
-                                           capture_output=True, 
-                                           text=True)
-                if touch_result.returncode == 0:
-                    print("Successfully touched WSGI file")
-                else:
-                    print(f"Failed to touch WSGI file. Error: {touch_result.stderr}")
-            except Exception as e:
-                print(f"Failed to trigger reload: {str(e)}")
-            
-            return jsonify({
-                'message': 'Successfully pulled latest changes and attempted reload',
-                'output': result.stdout
-            }), 200
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = f'Failed to pull changes: {str(e)}\nOutput: {e.stdout}\nError: {e.stderr}'
-            print(error_msg)
-            return jsonify({'error': error_msg}), 500
-        except Exception as e:
-            error_msg = f'Unexpected error: {str(e)}'
-            print(error_msg)
-            return jsonify({'error': error_msg}), 500
-    
-    return jsonify({'message': 'Webhook received'}), 200
+        return jsonify({'message': 'Webhook received'}), 200
+        
+    except Exception as e:
+        print(f"Webhook error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/image-transform')
 def image_transform():
