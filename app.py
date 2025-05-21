@@ -149,14 +149,14 @@ def get_sporthive_results(name, year=None):
                     'name': classification.get('race', {}).get('name', '')
                 },
                 'classification': {
-                    'displayDistance': classification.get('displayDistance', ''),
-                    'category': classification.get('category', ''),
-                    'bib': classification.get('bib', ''),
-                    'chipTime': classification.get('chipTime', ''),
-                    'gunTime': classification.get('gunTime', ''),
-                    'rank': classification.get('rank', ''),
-                    'genderRank': classification.get('genderRank', ''),
-                    'categoryRank': classification.get('categoryRank', '')
+                    'displayDistance': classification.get('race', {}).get('displayDistance', ''),
+                    'category': classification.get('classification', {}).get('category', ''),
+                    'bib': classification.get('classification', {}).get('bib', ''),
+                    'chipTime': classification.get('classification', {}).get('chipTime', ''),
+                    'gunTime': classification.get('classification', {}).get('gunTime', ''),
+                    'rank': classification.get('classification', {}).get('rank', ''),
+                    'genderRank': classification.get('classification', {}).get('genderRank', ''),
+                    'categoryRank': classification.get('classification', {}).get('categoryRank', '')
                 }
             }
             results.append(result)
