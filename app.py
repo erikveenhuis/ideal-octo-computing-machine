@@ -15,6 +15,7 @@ import io
 import pillow_avif  # Ensure AVIF support is loaded
 import subprocess
 import time
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -53,22 +54,59 @@ def get_uitslagen_results(name):
         # Process each result section
         for section in result_sections:
             try:
-                # Extract event details
-                event_name = section.find('h3').text.strip()
-                event_date = section.find('div', class_='zk-datum').text.strip()
+                # Find the event name and date from the zk-evnm row
+                event_row = section.find('tr', class_='zk-evnm')
+                if not event_row:
+                    print("Skipping section: No event row found")
+                    continue
                 
-                # Extract race details
-                race_name = section.find('div', class_='zk-afstand').text.strip()
+                # Get the event name and date from the th element
+                event_th = event_row.find('th', colspan='6')
+                if not event_th:
+                    print("Skipping section: No event details found")
+                    continue
+                
+                # Split the text into date and name
+                event_text = event_th.text.strip()
+                event_parts = event_text.split(' ', 1)
+                if len(event_parts) != 2:
+                    print(f"Skipping section: Invalid event format: {event_text}")
+                    continue
+                
+                event_date = event_parts[0]
+                event_name = event_parts[1]
+                
+                # Find the race name from the db row
+                race_row = section.find('tr', class_='db')
+                if not race_row:
+                    print("Skipping section: No race row found")
+                    continue
+                
+                race_name = race_row.find('td').text.strip()
                 
                 # Extract classification details
                 classification = {}
                 classification_rows = section.find_all('tr')
                 for row in classification_rows:
+                    # Skip header rows
+                    if 'class' in row.attrs and row['class'] in ['zk-evnm', 'db', 'lb']:
+                        continue
+                    
                     cells = row.find_all('td')
-                    if len(cells) >= 2:
-                        key = cells[0].text.strip().lower().replace(' ', '_')
-                        value = cells[1].text.strip()
-                        classification[key] = value
+                    if len(cells) >= 7:  # We expect 7 columns based on the HTML structure
+                        # Clean up pace values by removing units and extra spaces
+                        pace_kmh = cells[5].text.strip().replace(' km/u', '').strip()
+                        pace_minkm = cells[6].text.strip().replace(' min/km', '').strip()
+                        
+                        classification = {
+                            'rank': cells[0].text.strip(),
+                            'name': cells[1].text.strip(),
+                            'club': cells[2].text.strip(),
+                            'gun_time': cells[3].text.strip(),
+                            'chip_time': cells[4].text.strip(),
+                            'pace_kmh': pace_kmh,
+                            'pace_minkm': pace_minkm
+                        }
                 
                 # Add to results if we have the minimum required data
                 if event_name and event_date and race_name:
@@ -122,10 +160,21 @@ def get_sporthive_results(name, year=None):
         # Extract and format results
         results = []
         for classification in data.get('fullClassifications', []):
+            # Format the date
+            event_date = classification.get('event', {}).get('date', '')
+            if event_date:
+                try:
+                    # Parse the ISO format date
+                    date_obj = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                    # Format to YYYY-MM-DD HH:mm
+                    event_date = date_obj.strftime('%Y-%m-%d %H:%M')
+                except (ValueError, AttributeError):
+                    print(f"Error formatting date: {event_date}")
+            
             result = {
                 'event': {
                     'name': classification.get('event', {}).get('name', ''),
-                    'date': classification.get('event', {}).get('date', '')
+                    'date': event_date
                 },
                 'race': {
                     'name': classification.get('race', {}).get('name', '')
