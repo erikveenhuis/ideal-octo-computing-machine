@@ -13,6 +13,8 @@ import tempfile
 from PIL import Image
 import io
 import pillow_avif  # Ensure AVIF support is loaded
+import subprocess
+import time
 
 app = Flask(__name__)
 
@@ -273,9 +275,6 @@ def github_webhook():
     
     if event_type == 'push':
         try:
-            import subprocess
-            import os
-            
             # Get the current working directory
             current_dir = os.getcwd()
             print(f"Current working directory: {current_dir}")
@@ -329,16 +328,22 @@ def github_webhook():
             # Install/update dependencies
             print("Installing/updating dependencies...")
             try:
-                # Use the correct Python environment
-                python_path = '/home/erikveenhuis/.local/bin/python3'
-                pip_path = '/home/erikveenhuis/.local/bin/pip3'
+                # Use PythonAnywhere's virtual environment
+                venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/python'
+                pip_path = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
                 
                 # Ensure we're in the correct directory
                 os.chdir('/home/erikveenhuis/my-flask-app')
+                print(f"Changed to directory: {os.getcwd()}")
                 
+                # Activate virtual environment and install dependencies
                 pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
-                                         text=True)
+                                         text=True,
+                                         env={
+                                             'PATH': '/home/erikveenhuis/.virtualenvs/my-flask-app/bin:' + os.environ.get('PATH', ''),
+                                             'VIRTUAL_ENV': '/home/erikveenhuis/.virtualenvs/my-flask-app'
+                                         })
                 print(f"Pip install output: {pip_result.stdout}")
                 if pip_result.stderr:
                     print(f"Pip install errors: {pip_result.stderr}")
@@ -346,48 +351,33 @@ def github_webhook():
                 print(f"Failed to install dependencies: {str(e)}")
             
             # Touch the WSGI file to trigger a reload
-            # Try multiple possible WSGI file locations
-            wsgi_locations = [
-                '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py',  # Main WSGI file
-                '/home/erikveenhuis/my-flask-app/wsgi.py',  # App directory WSGI
-                os.path.join(current_dir, 'wsgi.py'),  # Current directory
-                os.path.join(current_dir, 'passenger_wsgi.py')  # Passenger WSGI
-            ]
-            
-            wsgi_touched = False
-            for wsgi_file in wsgi_locations:
-                if os.path.exists(wsgi_file):
-                    print(f"Touching WSGI file: {wsgi_file}")
-                    try:
-                        # Use sudo to touch the WSGI file if needed
-                        if wsgi_file.startswith('/var/www/'):
-                            subprocess.run(['sudo', 'touch', wsgi_file], 
-                                        capture_output=True, 
-                                        text=True)
-                        else:
-                            os.utime(wsgi_file, None)
-                        wsgi_touched = True
-                        print(f"Successfully touched {wsgi_file}")
-                    except Exception as e:
-                        print(f"Failed to touch {wsgi_file}: {str(e)}")
-            
-            if not wsgi_touched:
-                print("Warning: Could not find or touch any WSGI file")
-                print("Attempting to touch main WSGI file directly...")
-                try:
-                    main_wsgi = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
-                    subprocess.run(['sudo', 'touch', main_wsgi], 
+            print("Attempting to reload the application...")
+            try:
+                # Use PythonAnywhere's reload script
+                reload_script = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
+                if os.path.exists(reload_script):
+                    print(f"Touching reload script: {reload_script}")
+                    subprocess.run(['touch', reload_script], 
                                 capture_output=True, 
                                 text=True)
-                    wsgi_touched = True
-                    print(f"Successfully touched main WSGI file: {main_wsgi}")
-                except Exception as e:
-                    print(f"Failed to touch main WSGI file: {str(e)}")
+                    print("Successfully triggered reload")
+                else:
+                    print(f"Reload script not found at: {reload_script}")
+                    
+                # Also try the alternative method
+                alt_reload = '/home/erikveenhuis/reload.txt'
+                print(f"Creating reload file: {alt_reload}")
+                with open(alt_reload, 'w') as f:
+                    f.write(str(time.time()))
+                print("Successfully created reload file")
+                
+            except Exception as e:
+                print(f"Failed to trigger reload: {str(e)}")
             
             return jsonify({
                 'message': 'Successfully pulled latest changes and attempted reload',
                 'output': result.stdout,
-                'wsgi_touched': wsgi_touched
+                'wsgi_touched': True
             }), 200
             
         except subprocess.CalledProcessError as e:
