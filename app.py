@@ -328,21 +328,21 @@ def github_webhook():
             # Install/update dependencies
             print("Installing/updating dependencies...")
             try:
-                # Use PythonAnywhere's virtual environment
-                venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/python'
-                pip_path = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+                # Use the correct virtual environment
+                venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
+                pip_path = os.path.join(venv_path, 'bin/pip')
                 
                 # Ensure we're in the correct directory
                 os.chdir('/home/erikveenhuis/my-flask-app')
                 print(f"Changed to directory: {os.getcwd()}")
                 
-                # Activate virtual environment and install dependencies
+                # Install dependencies using the virtual environment's pip
                 pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
                                          env={
-                                             'PATH': '/home/erikveenhuis/.virtualenvs/my-flask-app/bin:' + os.environ.get('PATH', ''),
-                                             'VIRTUAL_ENV': '/home/erikveenhuis/.virtualenvs/my-flask-app'
+                                             'PATH': os.path.join(venv_path, 'bin') + ':' + os.environ.get('PATH', ''),
+                                             'VIRTUAL_ENV': venv_path
                                          })
                 print(f"Pip install output: {pip_result.stdout}")
                 if pip_result.stderr:
@@ -350,34 +350,35 @@ def github_webhook():
             except Exception as e:
                 print(f"Failed to install dependencies: {str(e)}")
             
-            # Touch the WSGI file to trigger a reload
+            # Reload the application
             print("Attempting to reload the application...")
             try:
-                # Use PythonAnywhere's reload script
-                reload_script = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
-                if os.path.exists(reload_script):
-                    print(f"Touching reload script: {reload_script}")
-                    subprocess.run(['touch', reload_script], 
-                                capture_output=True, 
-                                text=True)
-                    print("Successfully triggered reload")
-                else:
-                    print(f"Reload script not found at: {reload_script}")
-                    
-                # Also try the alternative method
-                alt_reload = '/home/erikveenhuis/reload.txt'
-                print(f"Creating reload file: {alt_reload}")
-                with open(alt_reload, 'w') as f:
+                # Create a reload file in the user's home directory
+                reload_file = os.path.expanduser('~/reload.txt')
+                print(f"Creating reload file at: {reload_file}")
+                
+                # Write current timestamp to the file
+                with open(reload_file, 'w') as f:
                     f.write(str(time.time()))
                 print("Successfully created reload file")
+                
+                # Also try to touch the WSGI file
+                wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
+                if os.path.exists(wsgi_file):
+                    print(f"Touching WSGI file: {wsgi_file}")
+                    subprocess.run(['touch', wsgi_file], 
+                                capture_output=True, 
+                                text=True)
+                    print("Successfully touched WSGI file")
+                else:
+                    print(f"WSGI file not found at: {wsgi_file}")
                 
             except Exception as e:
                 print(f"Failed to trigger reload: {str(e)}")
             
             return jsonify({
                 'message': 'Successfully pulled latest changes and attempted reload',
-                'output': result.stdout,
-                'wsgi_touched': True
+                'output': result.stdout
             }), 200
             
         except subprocess.CalledProcessError as e:
