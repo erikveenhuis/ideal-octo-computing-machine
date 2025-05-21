@@ -367,31 +367,16 @@ def github_webhook():
                 wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
                 print(f"Attempting to touch WSGI file: {wsgi_file}")
                 
-                # Check if we can access the file
-                if os.path.exists(wsgi_file):
-                    print("WSGI file exists")
-                    try:
-                        # Try to get file permissions
-                        stat = os.stat(wsgi_file)
-                        print(f"WSGI file permissions: {oct(stat.st_mode)}")
-                        print(f"WSGI file owner: {stat.st_uid}")
-                        print(f"WSGI file group: {stat.st_gid}")
-                        
-                        # Try to touch the file using the full path to touch
-                        touch_path = '/usr/bin/touch'
-                        print(f"Using touch from: {touch_path}")
-                        touch_result = subprocess.run([touch_path, wsgi_file], 
-                                                   capture_output=True, 
-                                                   text=True)
-                        if touch_result.returncode == 0:
-                            print("Successfully touched WSGI file")
-                        else:
-                            print(f"Failed to touch WSGI file. Error: {touch_result.stderr}")
-                    except Exception as e:
-                        print(f"Failed to touch WSGI file: {str(e)}")
+                # Try to touch the file using the full path to touch
+                touch_path = '/usr/bin/touch'
+                print(f"Using touch from: {touch_path}")
+                touch_result = subprocess.run([touch_path, wsgi_file], 
+                                           capture_output=True, 
+                                           text=True)
+                if touch_result.returncode == 0:
+                    print("Successfully touched WSGI file")
                 else:
-                    print(f"WSGI file not found at: {wsgi_file}")
-                
+                    print(f"Failed to touch WSGI file. Error: {touch_result.stderr}")
             except Exception as e:
                 print(f"Failed to trigger reload: {str(e)}")
             
