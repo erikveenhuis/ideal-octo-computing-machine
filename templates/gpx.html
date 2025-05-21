@@ -9,23 +9,63 @@
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            background-color: #fff;
+            display: flex;
+            flex-direction: row;
+            min-height: 100vh;
+        }
+        .sidebar {
+            width: 320px;
+            background: #fafbfc;
+            border-right: 1px solid #eee;
+            padding: 32px 24px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            min-height: 100vh;
         }
         .container {
+            flex: 1;
             max-width: 1200px;
             margin: 0 auto;
+            background: #fff;
+            box-shadow: none;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
         }
         #map {
             height: 600px;
-            margin-top: 20px;
-            border-radius: 8px;
-            border: 1px solid #ccc;
+            width: 800px;
+            margin-top: 40px;
+            border-radius: 0;
+            border: 2px solid #111;
+            box-shadow: none;
+            background: #fff;
         }
-        .upload-section {
-            margin-bottom: 20px;
-            padding: 20px;
-            background-color: #f5f5f5;
-            border-radius: 8px;
+        .upload-section, .controls, .nav-links {
+            background: none;
+            box-shadow: none;
+            border-radius: 0;
+        }
+        .controls label, .controls button {
+            display: block;
+            margin-bottom: 18px;
+        }
+        .controls label {
+            font-size: 15px;
+            color: #222;
+        }
+        .controls input[type="color"], .controls input[type="number"], .controls select {
+            margin-left: 8px;
+        }
+        .controls button {
+            margin-left: 0;
         }
         .error {
             color: red;
@@ -45,12 +85,6 @@
         }
         .nav-links a:hover {
             text-decoration: underline;
-        }
-        .controls {
-            margin: 20px 0;
-            display: flex;
-            gap: 10px;
-            align-items: center;
         }
         .toggle-button {
             padding: 8px 16px;
@@ -76,17 +110,42 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
+        @media print {
+            body, html {
+                background: #fff !important;
+                color: #000 !important;
+                margin: 0;
+                padding: 0;
+                display: block;
+            }
+            .sidebar, .upload-section, .controls, .nav-links, #message, .leaflet-control-container {
+                display: none !important;
+            }
+            .container {
+                max-width: none;
+                width: 100vw;
+                padding: 0;
+                margin: 0;
+                background: #fff !important;
+                box-shadow: none !important;
+                align-items: stretch;
+            }
+            #map {
+                height: 90vh !important;
+                width: 100vw !important;
+                border: 2px solid #111 !important;
+                margin: 0 auto !important;
+                page-break-after: avoid;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="sidebar">
         <div class="nav-links">
             <a href="/">Home</a>
             <a href="/gpx">GPX Viewer</a>
         </div>
-        
-        <h1>GPX Route Viewer</h1>
-        
         <div class="upload-section">
             <h2>Upload GPX File</h2>
             <form id="uploadForm">
@@ -94,15 +153,14 @@
             </form>
             <div id="message"></div>
         </div>
-        
         <div class="controls">
             <button id="toggleMarkers" class="toggle-button active">Show Start/Finish</button>
-            <label style="margin-left:20px;">Route color: <input type="color" id="routeColor" value="#e74c3c" style="vertical-align:middle;"></label>
-            <label style="margin-left:10px;">Start color: <input type="color" id="startColor" value="#2ecc71" style="vertical-align:middle;"></label>
-            <label style="margin-left:10px;">Finish color: <input type="color" id="finishColor" value="#ff0000" style="vertical-align:middle;"></label>
-            <label style="margin-left:10px;">Route width: <input type="number" id="routeWidth" value="5" min="1" max="20" style="width:50px;vertical-align:middle;"></label>
-            <label style="margin-left:20px;">Map style:
-                <select id="mapStyle" style="vertical-align:middle;">
+            <label>Route color: <input type="color" id="routeColor" value="#e74c3c"></label>
+            <label>Start color: <input type="color" id="startColor" value="#2ecc71"></label>
+            <label>Finish color: <input type="color" id="finishColor" value="#ff0000"></label>
+            <label>Route width: <input type="number" id="routeWidth" value="5" min="1" max="20" style="width:50px;"></label>
+            <label>Map style:
+                <select id="mapStyle">
                     <option value="carto-light">CartoDB Light</option>
                     <option value="osm">OpenStreetMap Standard</option>
                     <option value="carto-dark">CartoDB Dark</option>
@@ -110,12 +168,16 @@
                     <option value="stamen-terrain">Stamen Terrain</option>
                 </select>
             </label>
+            <button id="saveImageBtn" class="toggle-button" style="background:#222;color:#fff;">Save as Image</button>
         </div>
-        
+    </div>
+    <div class="container">
+        <h1 style="display:none;">GPX Route Viewer</h1>
         <div id="map"></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-image@0.4.0/leaflet-image.js"></script>
     <script>
         const STADIA_API_KEY = '609ac747-69d6-4090-93ce-ec7a3250c622';
         const tileLayers = {
@@ -149,13 +211,16 @@
             )
         };
 
-        // Initialize the map with default style
+        // Initialize the map with default style, interactive by default
         const map = L.map('map', {
             center: [52.3676, 4.9041],
             zoom: 13,
-            layers: [tileLayers['carto-light']]
+            layers: [tileLayers['stamen-toner']],
+            zoomControl: true,
+            attributionControl: true
+            // All interactive features enabled by default
         });
-        let currentTileLayer = tileLayers['carto-light'];
+        let currentTileLayer = tileLayers['stamen-toner'];
 
         // Map style switcher with error handling
         document.getElementById('mapStyle').addEventListener('change', function() {
@@ -189,52 +254,49 @@
         let finishColor = document.getElementById('finishColor').value;
         let routeWidth = parseInt(document.getElementById('routeWidth').value, 10);
 
-        // Create custom icons for start and finish
-        const startIcon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style="background-color: #2ecc71; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
-        });
+        // Helper to create SVG icon as data URL
+        function createSvgIcon(color) {
+            const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><circle cx='12' cy='12' r='8' fill='${color}' stroke='white' stroke-width='3'/></svg>`;
+            return 'data:image/svg+xml;base64,' + btoa(svg);
+        }
 
-        const finishIcon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style="background-color: #e74c3c; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [12, 12],
-            iconAnchor: [6, 6]
-        });
+        function createImageIcon(color) {
+            return L.icon({
+                iconUrl: createSvgIcon(color),
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
+                popupAnchor: [0, -12]
+            });
+        }
+
+        function addStartFinishMarkers(points) {
+            if (points.length > 0) {
+                startMarker = L.marker(points[0], { icon: createImageIcon(startColor) })
+                    .bindPopup('Start')
+                    .addTo(map);
+                finishMarker = L.marker(points[points.length - 1], { icon: createImageIcon(finishColor) })
+                    .bindPopup('Finish')
+                    .addTo(map);
+            }
+        }
+
+        function removeStartFinishMarkers() {
+            if (startMarker) map.removeLayer(startMarker);
+            if (finishMarker) map.removeLayer(finishMarker);
+            startMarker = null;
+            finishMarker = null;
+        }
 
         // Toggle markers button handler
         document.getElementById('toggleMarkers').addEventListener('click', function() {
             showMarkers = !showMarkers;
             this.classList.toggle('active');
-            
             if (currentRoute) {
                 if (showMarkers) {
                     const points = currentRoute.getLatLngs();
-                    if (points.length > 0) {
-                        startMarker = L.marker(points[0], { icon: L.divIcon({
-                            className: 'custom-div-icon',
-                            html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
-                        }) })
-                        .bindPopup('Start')
-                        .addTo(map);
-                        finishMarker = L.marker(points[points.length - 1], { icon: L.divIcon({
-                            className: 'custom-div-icon',
-                            html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
-                        }) })
-                        .bindPopup('Finish')
-                        .addTo(map);
-                    }
+                    addStartFinishMarkers(points);
                 } else {
-                    if (startMarker) map.removeLayer(startMarker);
-                    if (finishMarker) map.removeLayer(finishMarker);
-                    startMarker = null;
-                    finishMarker = null;
+                    removeStartFinishMarkers();
                 }
             }
         });
@@ -246,11 +308,11 @@
         });
         document.getElementById('startColor').addEventListener('input', function() {
             startColor = this.value;
-            updateMarkers();
+            if (startMarker) startMarker.setIcon(createImageIcon(startColor));
         });
         document.getElementById('finishColor').addEventListener('input', function() {
             finishColor = this.value;
-            updateMarkers();
+            if (finishMarker) finishMarker.setIcon(createImageIcon(finishColor));
         });
 
         document.getElementById('routeWidth').addEventListener('input', function() {
@@ -261,25 +323,6 @@
         function updateRouteColor() {
             if (currentRoute) {
                 currentRoute.setStyle({ color: routeColor });
-            }
-        }
-
-        function updateMarkers() {
-            if (startMarker) {
-                startMarker.setIcon(L.divIcon({
-                    className: 'custom-div-icon',
-                    html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
-                }));
-            }
-            if (finishMarker) {
-                finishMarker.setIcon(L.divIcon({
-                    className: 'custom-div-icon',
-                    html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
-                }));
             }
         }
 
@@ -329,28 +372,14 @@
                 currentRoute = L.polyline(points, {
                     color: routeColor,
                     weight: routeWidth,
-                    opacity: 0.7
+                    opacity: 0.7,
+                    renderer: L.canvas()
                 }).addTo(map);
 
                 map.fitBounds(currentRoute.getBounds());
 
                 if (showMarkers && points.length > 0) {
-                    startMarker = L.marker(points[0], { icon: L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style=\"background-color: ${startColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                        iconSize: [12, 12],
-                        iconAnchor: [6, 6]
-                    }) })
-                    .bindPopup('Start')
-                    .addTo(map);
-                    finishMarker = L.marker(points[points.length - 1], { icon: L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style=\"background-color: ${finishColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.3);\"></div>`,
-                        iconSize: [12, 12],
-                        iconAnchor: [6, 6]
-                    }) })
-                    .bindPopup('Finish')
-                    .addTo(map);
+                    addStartFinishMarkers(points);
                 }
 
                 messageDiv.className = 'success';
@@ -366,6 +395,21 @@
         map.removeLayer(currentTileLayer);
         currentTileLayer = tileLayers['stamen-toner'];
         map.addLayer(currentTileLayer);
+
+        // Save as Image functionality using leaflet-image
+        document.getElementById('saveImageBtn').addEventListener('click', function() {
+            leafletImage(map, function(err, canvas) {
+                if (err) {
+                    alert('Error saving image.');
+                    return;
+                }
+                // Create a link and trigger download
+                const link = document.createElement('a');
+                link.download = 'map.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            });
+        });
     </script>
 </body>
 </html> 
