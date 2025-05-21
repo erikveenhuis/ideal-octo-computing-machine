@@ -331,10 +331,8 @@ def github_webhook():
                 # Use the correct virtual environment
                 venv_path = '/home/erikveenhuis/.virtualenvs/my-flask-app'
                 python_path = os.path.join(venv_path, 'bin/python')
-                pip_path = os.path.join(venv_path, 'bin/pip')
                 
                 print(f"Using Python from: {python_path}")
-                print(f"Using pip from: {pip_path}")
                 print(f"Current PATH: {os.environ.get('PATH', '')}")
                 
                 # Ensure we're in the correct directory
@@ -345,14 +343,14 @@ def github_webhook():
                 env = os.environ.copy()
                 env['PATH'] = os.path.join(venv_path, 'bin') + ':' + env.get('PATH', '')
                 env['VIRTUAL_ENV'] = venv_path
-                env['PYTHONPATH'] = os.path.join(venv_path, 'lib/python3.13/site-packages')
+                env['PYTHONUSERBASE'] = venv_path  # Prevent user installations
                 
                 print(f"Updated PATH: {env['PATH']}")
                 print(f"VIRTUAL_ENV: {env['VIRTUAL_ENV']}")
-                print(f"PYTHONPATH: {env['PYTHONPATH']}")
+                print(f"PYTHONUSERBASE: {env['PYTHONUSERBASE']}")
                 
-                # Install dependencies using the virtual environment's pip directly
-                pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
+                # Install dependencies using Python's -m pip flag
+                pip_result = subprocess.run([python_path, '-m', 'pip', 'install', '--no-user', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True,
                                          env=env)
@@ -393,16 +391,6 @@ def github_webhook():
                         print(f"Failed to touch WSGI file: {str(e)}")
                 else:
                     print(f"WSGI file not found at: {wsgi_file}")
-                
-                # Also try the reload.txt method as backup
-                reload_file = os.path.expanduser('~/reload.txt')
-                print(f"Creating reload file at: {reload_file}")
-                try:
-                    with open(reload_file, 'w') as f:
-                        f.write(str(time.time()))
-                    print("Successfully created reload file")
-                except Exception as e:
-                    print(f"Failed to create reload file: {str(e)}")
                 
             except Exception as e:
                 print(f"Failed to trigger reload: {str(e)}")
