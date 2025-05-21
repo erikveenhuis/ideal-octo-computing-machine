@@ -329,7 +329,14 @@ def github_webhook():
             # Install/update dependencies
             print("Installing/updating dependencies...")
             try:
-                pip_result = subprocess.run(['pip', 'install', '-r', 'requirements.txt'],
+                # Use the correct Python environment
+                python_path = '/home/erikveenhuis/.local/bin/python3'
+                pip_path = '/home/erikveenhuis/.local/bin/pip3'
+                
+                # Ensure we're in the correct directory
+                os.chdir('/home/erikveenhuis/my-flask-app')
+                
+                pip_result = subprocess.run([pip_path, 'install', '-r', 'requirements.txt'],
                                          capture_output=True,
                                          text=True)
                 print(f"Pip install output: {pip_result.stdout}")
@@ -352,7 +359,13 @@ def github_webhook():
                 if os.path.exists(wsgi_file):
                     print(f"Touching WSGI file: {wsgi_file}")
                     try:
-                        os.utime(wsgi_file, None)
+                        # Use sudo to touch the WSGI file if needed
+                        if wsgi_file.startswith('/var/www/'):
+                            subprocess.run(['sudo', 'touch', wsgi_file], 
+                                        capture_output=True, 
+                                        text=True)
+                        else:
+                            os.utime(wsgi_file, None)
                         wsgi_touched = True
                         print(f"Successfully touched {wsgi_file}")
                     except Exception as e:
@@ -363,7 +376,9 @@ def github_webhook():
                 print("Attempting to touch main WSGI file directly...")
                 try:
                     main_wsgi = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
-                    os.utime(main_wsgi, None)
+                    subprocess.run(['sudo', 'touch', main_wsgi], 
+                                capture_output=True, 
+                                text=True)
                     wsgi_touched = True
                     print(f"Successfully touched main WSGI file: {main_wsgi}")
                 except Exception as e:
