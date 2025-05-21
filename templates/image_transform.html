@@ -2,11 +2,6 @@
 
 {% block title %}Image Transform - Race Results{% endblock %}
 
-{% block extra_head %}
-<script src="https://unpkg.com/dropzone@5/dist/min/dropzone.min.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/dropzone@5/dist/min/dropzone.min.css" type="text/css" />
-{% endblock %}
-
 {% block content %}
 <div class="max-w-4xl mx-auto">
     <h1 class="text-3xl font-bold text-gray-900 dark:text-white mb-8">Transform Product Images</h1>
@@ -33,6 +28,16 @@
                 </div>
             </div>
             
+            <div id="loading" class="hidden">
+                <div class="flex items-center justify-center space-x-2">
+                    <div class="w-4 h-4 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce"></div>
+                    <div class="w-4 h-4 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                    <div class="w-4 h-4 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0.4s"></div>
+                </div>
+            </div>
+            
+            <div id="error" class="hidden text-red-600 dark:text-red-400 text-center"></div>
+            
             <button type="submit"
                 class="w-full bg-blue-600 dark:bg-blue-700 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
                 Transform Image
@@ -44,48 +49,6 @@
 
 {% block extra_scripts %}
 <script>
-    Dropzone.autoDiscover = false;
-    
-    const dropzone = new Dropzone("#imageDropzone", {
-        url: "/transform-image",
-        maxFiles: 1,
-        acceptedFiles: "image/*",
-        addRemoveLinks: true,
-        dictDefaultMessage: "Drop an image here or click to upload/take a photo",
-        init: function() {
-            this.on("addedfile", function(file) {
-                // Remove any existing files
-                if (this.files.length > 1) {
-                    this.removeFile(this.files[0]);
-                }
-            });
-
-            this.on("success", function(file, response) {
-                document.getElementById('preview').classList.remove('hidden');
-                document.getElementById('originalPreview').src = URL.createObjectURL(file);
-                document.getElementById('transformedPreview').innerHTML = `<img src="${response.image_url}" class="w-full h-64 object-contain" />`;
-                document.getElementById('loading').classList.add('hidden');
-            });
-
-            this.on("error", function(file, errorMessage) {
-                document.getElementById('error').textContent = errorMessage;
-                document.getElementById('error').classList.remove('hidden');
-                document.getElementById('loading').classList.add('hidden');
-            });
-
-            this.on("sending", function() {
-                document.getElementById('loading').classList.remove('hidden');
-                document.getElementById('error').classList.add('hidden');
-            });
-
-            this.on("removedfile", function() {
-                document.getElementById('preview').classList.add('hidden');
-                document.getElementById('originalPreview').src = '';
-                document.getElementById('transformedPreview').innerHTML = '<p class="text-gray-500">Transformed image will appear here</p>';
-            });
-        }
-    });
-
     // Preview original image
     document.getElementById('imageFile').addEventListener('change', function(e) {
         const file = e.target.files[0];
@@ -104,9 +67,12 @@
         
         const fileInput = document.getElementById('imageFile');
         const file = fileInput.files[0];
+        const loadingDiv = document.getElementById('loading');
+        const errorDiv = document.getElementById('error');
         
         if (!file) {
-            alert('Please select an image file');
+            errorDiv.textContent = 'Please select an image file';
+            errorDiv.classList.remove('hidden');
             return;
         }
         
@@ -114,6 +80,9 @@
         formData.append('file', file);
         
         try {
+            loadingDiv.classList.remove('hidden');
+            errorDiv.classList.add('hidden');
+            
             const response = await fetch('/transform-image', {
                 method: 'POST',
                 body: formData
@@ -122,7 +91,8 @@
             const data = await response.json();
             
             if (data.error) {
-                alert(data.error);
+                errorDiv.textContent = data.error;
+                errorDiv.classList.remove('hidden');
                 return;
             }
             
@@ -131,7 +101,10 @@
             
         } catch (error) {
             console.error('Error:', error);
-            alert('An error occurred while transforming the image');
+            errorDiv.textContent = 'An error occurred while transforming the image';
+            errorDiv.classList.remove('hidden');
+        } finally {
+            loadingDiv.classList.add('hidden');
         }
     });
 </script>
