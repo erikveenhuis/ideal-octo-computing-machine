@@ -272,13 +272,115 @@ def github_webhook():
     event_type = request.headers.get('X-GitHub-Event')
     
     if event_type == 'push':
-        # Pull the latest changes
         try:
             import subprocess
-            subprocess.run(['git', 'pull'], check=True)
-            return jsonify({'message': 'Successfully pulled latest changes'}), 200
+            import os
+            
+            # Get the current working directory
+            current_dir = os.getcwd()
+            print(f"Current working directory: {current_dir}")
+            
+            # Print git status and configuration
+            print("Checking git status...")
+            status_result = subprocess.run(['git', 'status'], 
+                                        capture_output=True, 
+                                        text=True)
+            print(f"Git status output: {status_result.stdout}")
+            
+            print("Checking git remote...")
+            remote_result = subprocess.run(['git', 'remote', '-v'], 
+                                        capture_output=True, 
+                                        text=True)
+            print(f"Git remote output: {remote_result.stdout}")
+            
+            # Ensure we're in the correct directory
+            if not os.path.exists(os.path.join(current_dir, '.git')):
+                print("Not in a git repository, attempting to find it...")
+                # Try to find the git repository in parent directories
+                parent_dir = os.path.dirname(current_dir)
+                while parent_dir != current_dir:
+                    if os.path.exists(os.path.join(parent_dir, '.git')):
+                        print(f"Found git repository in: {parent_dir}")
+                        os.chdir(parent_dir)
+                        break
+                    parent_dir = os.path.dirname(parent_dir)
+            
+            # Fetch all changes first
+            print("Fetching all changes...")
+            fetch_result = subprocess.run(['git', 'fetch', '--all'], 
+                                       capture_output=True, 
+                                       text=True)
+            print(f"Git fetch output: {fetch_result.stdout}")
+            
+            # Reset to origin/main (or your default branch)
+            print("Resetting to origin/main...")
+            reset_result = subprocess.run(['git', 'reset', '--hard', 'origin/main'], 
+                                       capture_output=True, 
+                                       text=True)
+            print(f"Git reset output: {reset_result.stdout}")
+            
+            # Pull the latest changes
+            print("Pulling latest changes...")
+            result = subprocess.run(['git', 'pull'], 
+                                 capture_output=True, 
+                                 text=True)
+            print(f"Git pull output: {result.stdout}")
+            
+            # Install/update dependencies
+            print("Installing/updating dependencies...")
+            try:
+                pip_result = subprocess.run(['pip', 'install', '-r', 'requirements.txt'],
+                                         capture_output=True,
+                                         text=True)
+                print(f"Pip install output: {pip_result.stdout}")
+                if pip_result.stderr:
+                    print(f"Pip install errors: {pip_result.stderr}")
+            except Exception as e:
+                print(f"Failed to install dependencies: {str(e)}")
+            
+            # Touch the WSGI file to trigger a reload
+            # Try multiple possible WSGI file locations
+            wsgi_locations = [
+                os.path.join(current_dir, 'wsgi.py'),
+                os.path.join(current_dir, 'passenger_wsgi.py'),
+                '/var/www/yourusername_pythonanywhere_com_wsgi.py',  # Default PythonAnywhere location
+                os.path.expanduser('~/yourusername.pythonanywhere.com/wsgi.py')  # User directory location
+            ]
+            
+            wsgi_touched = False
+            for wsgi_file in wsgi_locations:
+                if os.path.exists(wsgi_file):
+                    print(f"Touching WSGI file: {wsgi_file}")
+                    try:
+                        os.utime(wsgi_file, None)
+                        wsgi_touched = True
+                        print(f"Successfully touched {wsgi_file}")
+                    except Exception as e:
+                        print(f"Failed to touch {wsgi_file}: {str(e)}")
+            
+            if not wsgi_touched:
+                print("Warning: Could not find or touch any WSGI file")
+                # Try to find the WSGI file
+                print("Searching for WSGI files...")
+                for root, dirs, files in os.walk(current_dir):
+                    for file in files:
+                        if file.endswith('wsgi.py'):
+                            print(f"Found potential WSGI file: {os.path.join(root, file)}")
+            
+            return jsonify({
+                'message': 'Successfully pulled latest changes and attempted reload',
+                'output': result.stdout,
+                'wsgi_touched': wsgi_touched
+            }), 200
+            
         except subprocess.CalledProcessError as e:
-            return jsonify({'error': f'Failed to pull changes: {str(e)}'}), 500
+            error_msg = f'Failed to pull changes: {str(e)}\nOutput: {e.stdout}\nError: {e.stderr}'
+            print(error_msg)
+            return jsonify({'error': error_msg}), 500
+        except Exception as e:
+            error_msg = f'Unexpected error: {str(e)}'
+            print(error_msg)
+            return jsonify({'error': error_msg}), 500
     
     return jsonify({'message': 'Webhook received'}), 200
 
