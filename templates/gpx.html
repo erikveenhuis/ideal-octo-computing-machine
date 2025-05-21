@@ -17,8 +17,49 @@
         border-radius: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
+    .sidebar {
+        transition: all 0.3s ease-out;
+    }
+    .sidebar-content {
+        transition: all 0.3s ease-out;
+        max-height: 1000px;
+        opacity: 1;
+        overflow: hidden;
+    }
+    .sidebar.collapsed .sidebar-content {
+        max-height: 0;
+        opacity: 0;
+        margin: 0;
+        padding: 0;
+    }
+    .toggle-sidebar {
+        display: none;
+    }
+    @media (max-width: 768px) {
+        .toggle-sidebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0.75rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: inherit;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        .dark .toggle-sidebar {
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+        }
+        .toggle-sidebar:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+        .dark .toggle-sidebar:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+    }
     @media print {
-        .sidebar, .upload-section, .controls, .nav-links, #message, .leaflet-control-container {
+        .sidebar, .sidebar-content, .controls, .nav-links, #message, .leaflet-control-container {
             display: none !important;
         }
         #map {
@@ -33,82 +74,90 @@
 {% endblock %}
 
 {% block content %}
-<div class="flex flex-col lg:flex-row h-[calc(100vh-4rem)] lg:h-[calc(100vh-8rem)] overflow-hidden">
-    <div class="w-full lg:w-80 bg-gray-50 dark:bg-gray-800 p-6 lg:border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
-        <div class="space-y-6">
-            <div class="upload-section">
-                <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Upload GPX File</h2>
-                <form id="uploadForm">
-                    <input type="file" id="gpxFile" accept=".gpx" required
-                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
-                </form>
-                <div id="message" class="mt-2"></div>
-            </div>
+<div class="flex flex-col lg:flex-row h-[calc(100vh-4rem)] lg:h-[calc(100vh-8rem)]">
+    <div class="w-full lg:w-80 bg-gray-50 dark:bg-gray-800 lg:border-r border-gray-200 dark:border-gray-700">
+        <div class="sidebar">
+            <button class="toggle-sidebar text-gray-700 dark:text-gray-300">
+                <span class="font-medium">Controls</span>
+                <svg class="w-5 h-5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            <div class="sidebar-content p-4">
+                <div class="space-y-4">
+                    <div class="upload-section">
+                        <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Upload GPX File</h2>
+                        <form id="uploadForm">
+                            <input type="file" id="gpxFile" accept=".gpx" required
+                                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                        </form>
+                        <div id="message" class="mt-2"></div>
+                    </div>
 
-            <div class="controls space-y-4">
-                <div class="flex items-center justify-between">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Show Start/Finish</label>
-                    <button id="toggleMarkers" 
-                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-blue-600 dark:bg-blue-700">
-                        <span class="translate-x-5 pointer-events-none relative inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out">
-                            <span class="absolute inset-0 flex h-full w-full items-center justify-center transition-opacity" aria-hidden="true">
-                                <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 12 12">
-                                    <path d="M4 8l2-2m0 0l2-2M6 6L4 4m2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                </svg>
-                            </span>
-                        </span>
-                    </button>
+                    <div class="controls space-y-4">
+                        <div class="flex items-center justify-between">
+                            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Show Start/Finish</label>
+                            <button id="toggleMarkers" 
+                                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-blue-600 dark:bg-blue-700">
+                                <span class="translate-x-5 pointer-events-none relative inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out">
+                                    <span class="absolute inset-0 flex h-full w-full items-center justify-center transition-opacity" aria-hidden="true">
+                                        <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 12 12">
+                                            <path d="M4 8l2-2m0 0l2-2M6 6L4 4m2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                        </svg>
+                                    </span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route color:</label>
+                                <input type="color" id="routeColor" value="#e74c3c" 
+                                    class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Start color:</label>
+                                <input type="color" id="startColor" value="#2ecc71" 
+                                    class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Finish color:</label>
+                                <input type="color" id="finishColor" value="#ff0000" 
+                                    class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route width:</label>
+                                <input type="number" id="routeWidth" value="5" min="1" max="20" 
+                                    class="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Map style:</label>
+                                <select id="mapStyle" 
+                                    class="w-40 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+                                    <option value="carto-light">CartoDB Light</option>
+                                    <option value="osm">OpenStreetMap Standard</option>
+                                    <option value="carto-dark">CartoDB Dark</option>
+                                    <option value="stamen-toner" selected>Stamen Toner</option>
+                                    <option value="stamen-terrain">Stamen Terrain</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button id="saveImageBtn" 
+                            class="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
+                            Save as Image
+                        </button>
+                    </div>
                 </div>
-
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route color:</label>
-                        <input type="color" id="routeColor" value="#e74c3c" 
-                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Start color:</label>
-                        <input type="color" id="startColor" value="#2ecc71" 
-                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Finish color:</label>
-                        <input type="color" id="finishColor" value="#ff0000" 
-                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route width:</label>
-                        <input type="number" id="routeWidth" value="5" min="1" max="20" 
-                            class="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
-                    </div>
-                </div>
-
-                <div class="space-y-2">
-                    <div class="flex items-center justify-between">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Map style:</label>
-                        <select id="mapStyle" 
-                            class="w-40 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
-                            <option value="carto-light">CartoDB Light</option>
-                            <option value="osm">OpenStreetMap Standard</option>
-                            <option value="carto-dark">CartoDB Dark</option>
-                            <option value="stamen-toner" selected>Stamen Toner</option>
-                            <option value="stamen-terrain">Stamen Terrain</option>
-                        </select>
-                    </div>
-                </div>
-
-                <button id="saveImageBtn" 
-                    class="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
-                    Save as Image
-                </button>
             </div>
         </div>
     </div>
 
-    <div class="flex-1 relative">
-        <div class="absolute inset-0">
-            <div id="map"></div>
-        </div>
+    <div class="flex-1 h-full">
+        <div id="map"></div>
     </div>
 </div>
 {% endblock %}
@@ -151,8 +200,8 @@
 
     // Initialize the map with default style
     const map = L.map('map', {
-        center: [52.3676, 4.9041],
-        zoom: 13,
+        center: [52.1326, 5.2913],
+        zoom: 7,
         layers: [tileLayers['stamen-toner']],
         zoomControl: true,
         attributionControl: true
@@ -359,6 +408,19 @@
             link.href = canvas.toDataURL('image/png');
             link.click();
         });
+    });
+
+    // Toggle sidebar on mobile
+    document.querySelector('.toggle-sidebar').addEventListener('click', function() {
+        const sidebar = document.querySelector('.sidebar');
+        const icon = this.querySelector('svg');
+        sidebar.classList.toggle('collapsed');
+        icon.classList.toggle('rotate-180');
+        
+        // Trigger a resize event to ensure the map updates its size
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 300);
     });
 </script>
 {% endblock %} 
