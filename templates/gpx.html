@@ -8,7 +8,6 @@
     #map {
         height: 100%;
         width: 100%;
-        border-radius: 0.5rem;
         border: 2px solid #111;
     }
     .marker-info {
@@ -17,24 +16,6 @@
         background-color: white;
         border-radius: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-    .map-container {
-        position: relative;
-        width: 100%;
-        padding-bottom: 100%;
-    }
-    .map-container > div {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-    }
-    @media (min-width: 1024px) {
-        .map-container {
-            padding-bottom: 0;
-            height: calc(100vh - 14rem);
-        }
     }
     @media print {
         .sidebar, .upload-section, .controls, .nav-links, #message, .leaflet-control-container {
@@ -52,66 +33,80 @@
 {% endblock %}
 
 {% block content %}
-<div class="flex flex-col lg:flex-row h-[calc(100vh-4rem)] overflow-hidden">
-    <div class="w-full lg:w-80 bg-gray-50 p-6 lg:border-r border-gray-200 overflow-y-auto">
+<div class="flex flex-col lg:flex-row h-[calc(100vh-8rem)] overflow-hidden">
+    <div class="w-full lg:w-80 bg-gray-50 dark:bg-gray-800 p-6 lg:border-r border-gray-200 dark:border-gray-700 overflow-y-auto">
         <div class="space-y-6">
             <div class="upload-section">
-                <h2 class="text-xl font-semibold mb-4">Upload GPX File</h2>
+                <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Upload GPX File</h2>
                 <form id="uploadForm">
                     <input type="file" id="gpxFile" accept=".gpx" required
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
                 </form>
                 <div id="message" class="mt-2"></div>
             </div>
 
             <div class="controls space-y-4">
-                <button id="toggleMarkers" 
-                    class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 active">
-                    Show Start/Finish
-                </button>
-
-                <div class="space-y-2">
-                    <label class="block text-sm font-medium text-gray-700">
-                        Route color: 
-                        <input type="color" id="routeColor" value="#e74c3c" class="ml-2">
-                    </label>
-                    <label class="block text-sm font-medium text-gray-700">
-                        Start color: 
-                        <input type="color" id="startColor" value="#2ecc71" class="ml-2">
-                    </label>
-                    <label class="block text-sm font-medium text-gray-700">
-                        Finish color: 
-                        <input type="color" id="finishColor" value="#ff0000" class="ml-2">
-                    </label>
-                    <label class="block text-sm font-medium text-gray-700">
-                        Route width: 
-                        <input type="number" id="routeWidth" value="5" min="1" max="20" class="ml-2 w-20">
-                    </label>
+                <div class="flex items-center justify-between">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Show Start/Finish</label>
+                    <button id="toggleMarkers" 
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 bg-blue-600 dark:bg-blue-700">
+                        <span class="translate-x-5 pointer-events-none relative inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out">
+                            <span class="absolute inset-0 flex h-full w-full items-center justify-center transition-opacity" aria-hidden="true">
+                                <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 12 12">
+                                    <path d="M4 8l2-2m0 0l2-2M6 6L4 4m2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </span>
+                        </span>
+                    </button>
                 </div>
 
                 <div class="space-y-2">
-                    <label class="block text-sm font-medium text-gray-700">
-                        Map style:
-                        <select id="mapStyle" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route color:</label>
+                        <input type="color" id="routeColor" value="#e74c3c" 
+                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Start color:</label>
+                        <input type="color" id="startColor" value="#2ecc71" 
+                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Finish color:</label>
+                        <input type="color" id="finishColor" value="#ff0000" 
+                            class="h-8 w-8 rounded-md border border-gray-300 dark:border-gray-600">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Route width:</label>
+                        <input type="number" id="routeWidth" value="5" min="1" max="20" 
+                            class="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Map style:</label>
+                        <select id="mapStyle" 
+                            class="w-40 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
                             <option value="carto-light">CartoDB Light</option>
                             <option value="osm">OpenStreetMap Standard</option>
                             <option value="carto-dark">CartoDB Dark</option>
                             <option value="stamen-toner" selected>Stamen Toner</option>
                             <option value="stamen-terrain">Stamen Terrain</option>
                         </select>
-                    </label>
+                    </div>
                 </div>
 
                 <button id="saveImageBtn" 
-                    class="w-full px-4 py-2 bg-gray-900 text-white rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2">
+                    class="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
                     Save as Image
                 </button>
             </div>
         </div>
     </div>
 
-    <div class="flex-1 p-6">
-        <div class="map-container">
+    <div class="flex-1 relative">
+        <div class="absolute inset-0">
             <div id="map"></div>
         </div>
     </div>
@@ -232,7 +227,20 @@
     // Toggle markers button handler
     document.getElementById('toggleMarkers').addEventListener('click', function() {
         showMarkers = !showMarkers;
-        this.classList.toggle('active');
+        this.classList.toggle('bg-blue-600');
+        this.classList.toggle('bg-gray-200');
+        this.classList.toggle('dark:bg-blue-700');
+        this.classList.toggle('dark:bg-gray-700');
+        
+        const span = this.querySelector('span');
+        if (showMarkers) {
+            span.classList.remove('translate-x-0');
+            span.classList.add('translate-x-5');
+        } else {
+            span.classList.remove('translate-x-5');
+            span.classList.add('translate-x-0');
+        }
+        
         if (currentRoute) {
             if (showMarkers) {
                 const points = currentRoute.getLatLngs();
