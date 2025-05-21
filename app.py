@@ -353,25 +353,39 @@ def github_webhook():
             # Reload the application
             print("Attempting to reload the application...")
             try:
-                # Create a reload file in the user's home directory
-                reload_file = os.path.expanduser('~/reload.txt')
-                print(f"Creating reload file at: {reload_file}")
-                
-                # Write current timestamp to the file
-                with open(reload_file, 'w') as f:
-                    f.write(str(time.time()))
-                print("Successfully created reload file")
-                
-                # Also try to touch the WSGI file
+                # Use the exact WSGI file path
                 wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
+                print(f"Attempting to touch WSGI file: {wsgi_file}")
+                
+                # Check if we can access the file
                 if os.path.exists(wsgi_file):
-                    print(f"Touching WSGI file: {wsgi_file}")
-                    subprocess.run(['touch', wsgi_file], 
-                                capture_output=True, 
-                                text=True)
-                    print("Successfully touched WSGI file")
+                    print("WSGI file exists")
+                    try:
+                        # Try to get file permissions
+                        stat = os.stat(wsgi_file)
+                        print(f"WSGI file permissions: {oct(stat.st_mode)}")
+                        print(f"WSGI file owner: {stat.st_uid}")
+                        print(f"WSGI file group: {stat.st_gid}")
+                        
+                        # Try to touch the file
+                        subprocess.run(['touch', wsgi_file], 
+                                    capture_output=True, 
+                                    text=True)
+                        print("Successfully touched WSGI file")
+                    except Exception as e:
+                        print(f"Failed to touch WSGI file: {str(e)}")
                 else:
                     print(f"WSGI file not found at: {wsgi_file}")
+                
+                # Also try the reload.txt method as backup
+                reload_file = os.path.expanduser('~/reload.txt')
+                print(f"Creating reload file at: {reload_file}")
+                try:
+                    with open(reload_file, 'w') as f:
+                        f.write(str(time.time()))
+                    print("Successfully created reload file")
+                except Exception as e:
+                    print(f"Failed to create reload file: {str(e)}")
                 
             except Exception as e:
                 print(f"Failed to trigger reload: {str(e)}")
