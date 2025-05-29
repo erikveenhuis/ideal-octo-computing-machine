@@ -236,7 +236,12 @@ def search():
 @app.route('/gpx')
 def gpx_upload():
     """Renders the GPX upload page."""
-    return render_template('gpx.html', config={'STADIA_API_KEY': os.environ.get('STADIA_API_KEY')})
+    mapbox_token = os.environ.get('MAPBOX_ACCESS_TOKEN')
+    if not mapbox_token:
+        raise ValueError("MAPBOX_ACCESS_TOKEN environment variable is not set")
+    return render_template('gpx.html', config={
+        'MAPBOX_ACCESS_TOKEN': mapbox_token
+    })
 
 @app.route('/upload-gpx', methods=['POST'])
 def upload_gpx():
