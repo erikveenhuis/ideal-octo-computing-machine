@@ -148,7 +148,7 @@
 
                         <button id="saveImageBtn" 
                             class="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
-                            Save as Image
+                            Save as SVG
                         </button>
                     </div>
                 </div>
@@ -395,17 +395,100 @@
     currentTileLayer = tileLayers['stamen-toner'];
     map.addLayer(currentTileLayer);
 
-    // Save as Image functionality using leaflet-image
+    // Save as SVG functionality
     document.getElementById('saveImageBtn').addEventListener('click', function() {
-        leafletImage(map, function(err, canvas) {
+        leafletImage(map, function(err, canvasWithTiles) {
             if (err) {
-                alert('Error saving image.');
+                alert('Error creating map image for SVG: ' + err.message);
+                console.error('Error with leafletImage:', err);
                 return;
             }
-            // Create a link and trigger download
+
+            const mapImageDataUrl = canvasWithTiles.toDataURL('image/png');
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            const size = map.getSize();
+
+            svg.setAttribute('width', size.x);
+            svg.setAttribute('height', size.y);
+            svg.setAttribute('viewBox', `0 0 ${size.x} ${size.y}`);
+
+            // Add the map image (from canvas) as a background
+            const backgroundImage = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+            backgroundImage.setAttribute('x', '0');
+            backgroundImage.setAttribute('y', '0');
+            backgroundImage.setAttribute('width', size.x.toString());
+            backgroundImage.setAttribute('height', size.y.toString());
+            backgroundImage.setAttribute('href', mapImageDataUrl);
+            svg.appendChild(backgroundImage);
+
+            // Add route path if exists
+            if (currentRoute) {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const points = currentRoute.getLatLngs();
+                const pathData = points.map((point, i) => {
+                    const pixel = map.latLngToContainerPoint(point);
+                    return `${i === 0 ? 'M' : 'L'} ${pixel.x} ${pixel.y}`;
+                }).join(' ');
+                
+                path.setAttribute('d', pathData);
+                path.setAttribute('stroke', routeColor);
+                path.setAttribute('stroke-width', routeWidth.toString());
+                path.setAttribute('fill', 'none');
+                path.setAttribute('opacity', '0.7');
+                svg.appendChild(path);
+            }
+            
+            // Add markers if they exist
+            if (showMarkers && startMarker) {
+                const startPoint = map.latLngToContainerPoint(startMarker.getLatLng());
+                const startCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                startCircle.setAttribute('cx', startPoint.x.toString());
+                startCircle.setAttribute('cy', startPoint.y.toString());
+                startCircle.setAttribute('r', '8');
+                startCircle.setAttribute('fill', startColor);
+                startCircle.setAttribute('stroke', 'white');
+                startCircle.setAttribute('stroke-width', '3');
+                svg.appendChild(startCircle);
+
+                const startLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                startLabel.setAttribute('x', (startPoint.x + 15).toString());
+                startLabel.setAttribute('y', startPoint.y.toString());
+                startLabel.setAttribute('font-family', 'Arial, sans-serif');
+                startLabel.setAttribute('font-size', '12');
+                startLabel.setAttribute('fill', '#000000');
+                startLabel.setAttribute('alignment-baseline', 'middle');
+                startLabel.textContent = 'Start';
+                svg.appendChild(startLabel);
+            }
+            
+            if (showMarkers && finishMarker) {
+                const finishPoint = map.latLngToContainerPoint(finishMarker.getLatLng());
+                const finishCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                finishCircle.setAttribute('cx', finishPoint.x.toString());
+                finishCircle.setAttribute('cy', finishPoint.y.toString());
+                finishCircle.setAttribute('r', '8');
+                finishCircle.setAttribute('fill', finishColor);
+                finishCircle.setAttribute('stroke', 'white');
+                finishCircle.setAttribute('stroke-width', '3');
+                svg.appendChild(finishCircle);
+
+                const finishLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                finishLabel.setAttribute('x', (finishPoint.x + 15).toString());
+                finishLabel.setAttribute('y', finishPoint.y.toString());
+                finishLabel.setAttribute('font-family', 'Arial, sans-serif');
+                finishLabel.setAttribute('font-size', '12');
+                finishLabel.setAttribute('fill', '#000000');
+                finishLabel.setAttribute('alignment-baseline', 'middle');
+                finishLabel.textContent = 'Finish';
+                svg.appendChild(finishLabel);
+            }
+            
+            const serializer = new XMLSerializer();
+            const svgString = serializer.serializeToString(svg);
+            
             const link = document.createElement('a');
-            link.download = 'map.png';
-            link.href = canvas.toDataURL('image/png');
+            link.download = 'map_with_route.svg';
+            link.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
             link.click();
         });
     });
