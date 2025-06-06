@@ -5,10 +5,39 @@
 {% block extra_head %}
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.css" rel="stylesheet" />
 <style>
-    #map {
-        height: 100%;
+    .map-container {
         width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #f3f4f6;
+        position: relative; /* Create positioning context */
+    }
+    .dark .map-container {
+        background-color: #374151;
+    }
+    .map-wrapper {
+        /* Always maintain 8.5:11 aspect ratio */
+        aspect-ratio: 8.5 / 11;
+        /* Perfect size for clean 3x scaling to print (850x3=2550, 1100x3=3300) */
+        width: 850px;
+        height: auto; /* Height will be 1100px due to 8.5:11 aspect ratio */
         border: 2px solid #111;
+        border-radius: 4px;
+        overflow: hidden;
+        /* Absolute positioning within the map-container */
+        position: absolute;
+        /* Center within the container space (to the right of sidebar) */
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        transition: transform .2s ease-out;
+    }
+    #map {
+        width: 100%;
+        height: 100%;
+        border: none;
     }
     .marker-info {
         font-size: 12px;
@@ -34,55 +63,70 @@
     .toggle-sidebar {
         display: none;
     }
-    @media (max-width: 768px) {
-        .toggle-sidebar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-            padding: 0.75rem;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: inherit;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        }
-        .dark .toggle-sidebar {
-            border-bottom-color: rgba(255, 255, 255, 0.1);
-        }
-        .toggle-sidebar:hover {
-            background-color: rgba(0, 0, 0, 0.05);
-        }
-        .dark .toggle-sidebar:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-    }
+
+    /* Clean up - no mobile support needed since we show message instead */
     @media print {
         .sidebar, .sidebar-content, .controls, .nav-links, #message, .mapboxgl-control-container {
             display: none !important;
         }
-        #map {
+        .map-container {
+            background: white !important;
+            padding: 0 !important;
+        }
+        .map-wrapper {
+            max-width: none !important;
+            width: 100vw !important; 
             height: 90vh !important;
-            width: 100vw !important;
+            aspect-ratio: none !important;
             border: 2px solid #111 !important;
             margin: 0 auto !important;
             page-break-after: avoid;
         }
     }
+
+    /* Hide all Mapbox attribution elements completely */
+    .mapboxgl-ctrl-attrib,
+    .mapboxgl-ctrl-attrib-inner,
+    .mapboxgl-ctrl-attrib-button,
+    .mapboxgl-ctrl-logo,
+    .mapbox-improve-map {
+        display: none !important;
+        visibility: hidden !important;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="flex flex-col lg:flex-row h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] overflow-hidden">
-    <div class="w-full lg:w-80 bg-gray-50 dark:bg-gray-800 lg:border-r border-gray-200 dark:border-gray-700">
+<!-- Message for small screens -->
+<div class="lg:hidden flex items-center justify-center h-[calc(100vh-4rem)] bg-gray-50 dark:bg-gray-900 p-6">
+    <div class="text-center max-w-md">
+        <svg class="mx-auto h-16 w-16 text-gray-400 dark:text-gray-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-2">Desktop Experience Required</h2>
+        <p class="text-gray-600 dark:text-gray-300 mb-4">
+            The GPX Route Viewer is optimized for desktop and tablet screens. For the best experience with map viewing, route editing, and high-quality exports, please use a device with a screen width of at least 1024 pixels.
+        </p>
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+            <p class="text-sm text-blue-800 dark:text-blue-200">
+                <strong>Minimum recommended:</strong> 1024px width<br>
+                <strong>Optimal experience:</strong> 1280px+ width
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="hidden lg:block relative h-[calc(100vh-4rem)] overflow-hidden">
+    <!-- Fixed sidebar on the left -->
+    <div class="fixed left-0 top-16 w-80 h-[calc(100vh-4rem)] bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 z-10">
         <div class="sidebar h-full">
-            <button class="toggle-sidebar text-gray-700 dark:text-gray-300">
+            <button class="toggle-sidebar text-gray-700 dark:text-gray-300 lg:hidden">
                 <span class="font-medium">Controls</span>
                 <svg class="w-5 h-5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
-            <div class="sidebar-content p-4 h-[calc(100%-3rem)]">
+            <div class="sidebar-content p-4 h-[calc(100%-3rem)] lg:h-full">
                 <div class="flex flex-col h-full">
                     <div class="upload-section flex-shrink-0 mb-4">
                         <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Upload GPX File</h2>
@@ -138,9 +182,16 @@
         </div>
     </div>
 
-    <div class="flex-1 h-full overflow-hidden">
-        <div id="map" class="w-full h-full"></div>
+    
+    <!-- Map area with left margin for fixed sidebar -->
+    <div class="ml-80 h-full">
+        <div class="map-container">
+            <div class="map-wrapper">
+                <div id="map"></div>
+            </div>
+        </div>
     </div>
+</div>
 </div>
 {% endblock %}
 
@@ -163,7 +214,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // The style is set dynamically below to apply necessary runtime fixes.
         center: [5.2913, 52.1326], // Note: Mapbox uses [lng, lat] order
         zoom: 7,
-        attributionControl: true
+        attributionControl: false, // Remove attribution for cleaner export
+        preserveDrawingBuffer: true, // Essential for canvas export
+        fadeDuration: 0 // Disable fade animations for better export
     });
 
     async function setAndFixStyle(styleUrl) {
@@ -265,6 +318,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const response = await fetch('/upload-gpx', {
                 method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token() }}'
+                },
                 body: formData
             });
             
@@ -498,54 +554,461 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Function to add DPI metadata to PNG
+    function addPngDpiMetadata(pngData, pixelsPerMeter) {
+        try {
+            // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+            if (pngData[0] !== 0x89 || pngData[1] !== 0x50 || pngData[2] !== 0x4E || pngData[3] !== 0x47) {
+                throw new Error('Not a valid PNG file');
+            }
+            
+            // Find the IDAT chunk to insert pHYs before it
+            let insertPosition = 8; // Start after PNG signature
+            
+            while (insertPosition < pngData.length - 8) {
+                const chunkLength = (pngData[insertPosition] << 24) | (pngData[insertPosition + 1] << 16) | 
+                                  (pngData[insertPosition + 2] << 8) | pngData[insertPosition + 3];
+                const chunkType = String.fromCharCode(pngData[insertPosition + 4], pngData[insertPosition + 5], 
+                                                    pngData[insertPosition + 6], pngData[insertPosition + 7]);
+                
+                if (chunkType === 'IDAT') {
+                    break;
+                }
+                
+                insertPosition += 8 + chunkLength + 4; // 8 bytes header + data + 4 bytes CRC
+            }
+            
+            // Create pHYs chunk
+            const physChunk = new Uint8Array(21); // 4 length + 4 type + 9 data + 4 CRC
+            
+            // Length (9 bytes)
+            physChunk[0] = 0x00;
+            physChunk[1] = 0x00;
+            physChunk[2] = 0x00;
+            physChunk[3] = 0x09;
+            
+            // Type "pHYs"
+            physChunk[4] = 0x70; // p
+            physChunk[5] = 0x48; // H
+            physChunk[6] = 0x59; // Y
+            physChunk[7] = 0x73; // s
+            
+            // Data: pixels per unit X (4 bytes) + pixels per unit Y (4 bytes) + unit specifier (1 byte)
+            physChunk[8] = (pixelsPerMeter >>> 24) & 0xFF;
+            physChunk[9] = (pixelsPerMeter >>> 16) & 0xFF;
+            physChunk[10] = (pixelsPerMeter >>> 8) & 0xFF;
+            physChunk[11] = pixelsPerMeter & 0xFF;
+            
+            physChunk[12] = (pixelsPerMeter >>> 24) & 0xFF;
+            physChunk[13] = (pixelsPerMeter >>> 16) & 0xFF;
+            physChunk[14] = (pixelsPerMeter >>> 8) & 0xFF;
+            physChunk[15] = pixelsPerMeter & 0xFF;
+            
+            physChunk[16] = 0x01; // Unit: meters
+            
+            // Calculate CRC32 for type + data
+            const crc = calculateCRC32(physChunk.slice(4, 17));
+            physChunk[17] = (crc >>> 24) & 0xFF;
+            physChunk[18] = (crc >>> 16) & 0xFF;
+            physChunk[19] = (crc >>> 8) & 0xFF;
+            physChunk[20] = crc & 0xFF;
+            
+            // Insert pHYs chunk
+            const result = new Uint8Array(pngData.length + 21);
+            result.set(pngData.slice(0, insertPosition));
+            result.set(physChunk, insertPosition);
+            result.set(pngData.slice(insertPosition), insertPosition + 21);
+            
+            return result;
+        } catch (error) {
+            console.warn('Failed to add DPI metadata:', error);
+            return pngData; // Return original if modification fails
+        }
+    }
+    
+    // Simple CRC32 calculation for PNG chunks
+    function calculateCRC32(data) {
+        const crcTable = new Array(256);
+        for (let i = 0; i < 256; i++) {
+            let c = i;
+            for (let j = 0; j < 8; j++) {
+                c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            crcTable[i] = c;
+        }
+        
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < data.length; i++) {
+            crc = crcTable[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
     // Save as Image functionality
     if (!saveImageBtn) {
         console.error('Save as Image button not found!');
     } else {
         saveImageBtn.addEventListener('click', async function() {
-            
             try {
+                showToast('🗺️ Preparing your route for export...', 'success');
+                
+                // Wait for map to be completely loaded and styled
+                await new Promise((resolve, reject) => {
+                    let timeout = setTimeout(() => {
+                        reject(new Error('Timeout waiting for map to load'));
+                    }, 15000); // 15 second timeout
+                    
+                    const checkMapReady = () => {
+                        // Check if map is loaded, style is loaded, and no ongoing style operations
+                        if (map.loaded() && map.isStyleLoaded() && !map._isStyleLoading) {
+                            clearTimeout(timeout);
+                            console.log('Map is fully ready for export');
+                            showToast('📷 Capturing your route in high resolution...', 'success');
+                            resolve();
+                        } else {
+                            console.log('Map not ready:', {
+                                loaded: map.loaded(),
+                                styleLoaded: map.isStyleLoaded(),
+                                styleLoading: map._isStyleLoading
+                            });
+                            // Keep checking every 100ms
+                            setTimeout(checkMapReady, 100);
+                        }
+                    };
+                    
+                    checkMapReady();
+                });
+                
+                // Additional delay to ensure all rendering is complete
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
                 const dpi = 300;
-                let width, height;
                 
-                // Calculate dimensions in pixels for 8.5x11 inches at 300 DPI
-                width = Math.round(8.5 * dpi);  // 8.5 inches * 300 DPI
-                height = Math.round(11 * dpi);  // 11 inches * 300 DPI
+                // Force export canvas to always be exactly 850x1100 for perfect scaling
+                const exportCanvasWidth = 850;   // Always exactly 850px
+                const exportCanvasHeight = 1100; // Always exactly 1100px
                 
-                try {
-                    // Wait for the map to finish rendering
-                    map.once('idle', async () => {
-                        const canvas = map.getCanvas();
-                        const offscreenCanvas = document.createElement('canvas');
-                        offscreenCanvas.width = width;
-                        offscreenCanvas.height = height;
-
-                        await pica().resize(canvas, offscreenCanvas, {
-                            unsharpAmount: 80,
-                            unsharpRadius: 0.6,
-                            unsharpThreshold: 2,
-                        });
-
-                        const link = document.createElement('a');
-                        link.download = 'map.png';
-                        link.href = offscreenCanvas.toDataURL('image/png', 1.0);
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        
-                        showToast(`Map canvas captured and downloaded with ${dpi} DPI`, 'success');
-                    });
+                // Final print dimensions for 8.5" x 11" at 300 DPI
+                const finalWidth = 2550;
+                const finalHeight = 3300;
+                
+                // Store current map state with high precision
+                const currentCenter = map.getCenter();
+                const currentZoom = map.getZoom();
+                const currentBearing = map.getBearing();
+                const currentPitch = map.getPitch();
+                
+                // Store center with maximum precision to avoid any drift
+                const preciseCenter = [currentCenter.lng, currentCenter.lat];
+                
+                console.log('Capturing state - Center:', preciseCenter, 'Zoom:', currentZoom);
+                
+                console.log('Using exact zoom level:', currentZoom);
+                console.log('Fixed export canvas size:', exportCanvasWidth, 'x', exportCanvasHeight);
+                console.log('Final print size:', finalWidth, 'x', finalHeight);
+                
+                // Create temporary container with exact same styling as on-screen
+                const exportContainer = document.createElement('div');
+                exportContainer.style.width = exportCanvasWidth + 'px';
+                exportContainer.style.height = exportCanvasHeight + 'px';
+                exportContainer.style.position = 'absolute';
+                exportContainer.style.top = '-10000px'; // Hide off-screen
+                exportContainer.style.left = '-10000px';
+                exportContainer.style.border = 'none';
+                exportContainer.style.padding = '0';
+                exportContainer.style.margin = '0';
+                exportContainer.style.boxSizing = 'content-box';
+                document.body.appendChild(exportContainer);
+                
+                // Get pixel ratio from current map for exact rendering match
+                const pixelRatio = map.getCanvas().style.pixelRatio || window.devicePixelRatio || 1;
+                
+                // Create temporary map with exact same dimensions and zoom level
+                const exportMap = new mapboxgl.Map({
+                    container: exportContainer,
+                    style: map.getStyle(),
+                    center: preciseCenter, // Use precise center coordinates
+                    zoom: currentZoom, // Exact same zoom level
+                    bearing: currentBearing,
+                    pitch: currentPitch,
+                    preserveDrawingBuffer: true,
+                    fadeDuration: 0,
+                    interactive: false,
+                    // Ensure pixel-perfect rendering
+                    antialias: false,
+                    failIfMajorPerformanceCaveat: false,
+                    pixelRatio: 1, // Force consistent pixel ratio
+                    attributionControl: false // Match on-screen map - no attribution for cleaner export
+                });
+                
+                // Export map will have no controls to match the on-screen map
+                
+                // Track added images to prevent duplicates
+                const addedImages = new Set();
+                
+                // Handle missing images that could cause rendering differences
+                exportMap.on('styleimagemissing', (e) => {
+                    if (!addedImages.has(e.id)) {
+                        console.log('Handling missing image:', e.id);
+                        addedImages.add(e.id);
+                        // Create a 1x1 transparent pixel as fallback for missing images
+                        const img = new Image(1, 1);
+                        img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQIHWNgAAIAAAUAAY27m/MAAAAASUVORK5CYII=';
+                        img.onload = () => {
+                            try {
+                                exportMap.addImage(e.id, img);
+                            } catch (err) {
+                                console.log('Image already exists:', e.id);
+                            }
+                        };
+                    }
+                });
+                
+                // Wait for export map to load completely
+                await new Promise((resolve, reject) => {
+                    let timeout = setTimeout(() => {
+                        reject(new Error('Timeout waiting for export map to load'));
+                    }, 20000);
                     
-                    // Force a render to ensure we capture the latest state
-                    map.triggerRepaint();
+                    const checkExportMapReady = () => {
+                        if (exportMap.loaded() && exportMap.isStyleLoaded()) {
+                            clearTimeout(timeout);
+                            console.log('Export map is ready');
+                            resolve();
+                        } else {
+                            setTimeout(checkExportMapReady, 100);
+                        }
+                    };
                     
-                } catch (error) {
-                    console.error('Error capturing map canvas:', error);
-                    showToast('Error capturing map: ' + error.message, 'error');
+                    checkExportMapReady();
+                });
+                
+                // Triple synchronization approach to eliminate any drift
+                // First: Set position immediately after load
+                exportMap.setCenter(preciseCenter);
+                exportMap.setZoom(currentZoom);
+                exportMap.setBearing(currentBearing);
+                exportMap.setPitch(currentPitch);
+                
+                // Wait for initial positioning to settle
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Second: Force synchronization with on-screen map again
+                const currentState = {
+                    center: [map.getCenter().lng, map.getCenter().lat],
+                    zoom: map.getZoom(),
+                    bearing: map.getBearing(),
+                    pitch: map.getPitch()
+                };
+                
+                // Apply southward adjustment to compensate for navigation controls
+                // The navigation controls in the on-screen map effectively shift the visual center
+                const adjustedCenter = [
+                    currentState.center[0], // longitude unchanged
+                    currentState.center[1] - 0.0019 // latitude shifted more noticeably south
+                ];
+                
+                console.log('Applying southward adjustment to export center:', adjustedCenter);
+                console.log('Keeping zoom identical for same detail level:', currentState.zoom);
+                
+                exportMap.setCenter(adjustedCenter);
+                exportMap.setZoom(currentState.zoom); // Keep zoom identical for same detail level
+                exportMap.setBearing(currentState.bearing);
+                exportMap.setPitch(currentState.pitch);
+                
+                // Wait for second positioning to settle
+                await new Promise(resolve => setTimeout(resolve, 400));
+                
+                // Third: Final verification and micro-adjustment if needed
+                const exportState = {
+                    center: [exportMap.getCenter().lng, exportMap.getCenter().lat],
+                    zoom: exportMap.getZoom()
+                };
+                
+                // Check for any drift and correct it (but maintain the southward adjustment)
+                const centerDrift = Math.abs(exportState.center[0] - adjustedCenter[0]) + 
+                                  Math.abs(exportState.center[1] - adjustedCenter[1]);
+                const zoomDrift = Math.abs(exportState.zoom - currentState.zoom);
+                
+                if (centerDrift > 0.000001 || zoomDrift > 0.001) {
+                    console.log('Detected drift, applying final correction with adjustment');
+                    exportMap.setCenter(adjustedCenter); // Use adjusted center, not original
+                    exportMap.setZoom(currentState.zoom); // Keep zoom identical for same detail level
+                    exportMap.setBearing(currentState.bearing);
+                    exportMap.setPitch(currentState.pitch);
+                    
+                    // Additional settling time after correction
+                    await new Promise(resolve => setTimeout(resolve, 600));
                 }
+                
+                // CRITICAL: Ensure route data is synchronized to export map
+                if (routeSource && routeLayer) {
+                    console.log('Synchronizing route data to export map');
+                    
+                    // Add the same route source and layer to export map
+                    if (!exportMap.getSource('route')) {
+                        exportMap.addSource('route', routeSource);
+                        exportMap.addLayer(routeLayer);
+                    }
+                    
+                    // Also add markers if they exist and are visible
+                    if (showMarkers && markersSource && !exportMap.getSource('markers')) {
+                        exportMap.addSource('markers', markersSource);
+                        
+                        // Add marker layers in same order as on-screen map
+                        exportMap.addLayer({
+                            id: 'marker-circles',
+                            type: 'circle',
+                            source: 'markers',
+                            paint: {
+                                'circle-radius': 10,
+                                'circle-color': ['get', 'marker-color']
+                            }
+                        });
+                        
+                        exportMap.addLayer({
+                            id: 'markers',
+                            type: 'symbol',
+                            source: 'markers',
+                            layout: {
+                                'text-field': ['get', 'marker-symbol'],
+                                'text-size': 12,
+                                'text-anchor': 'center',
+                                'text-allow-overlap': true,
+                                'icon-image': 'none'
+                            },
+                            paint: {
+                                'text-color': '#ffffff'
+                            }
+                        });
+                        
+                        // Match marker visibility state
+                        if (!showMarkers) {
+                            exportMap.setLayoutProperty('markers', 'visibility', 'none');
+                            exportMap.setLayoutProperty('marker-circles', 'visibility', 'none');
+                        }
+                    }
+                    
+                    console.log('Route data synchronized successfully');
+                }
+                
+                // Final rendering stabilization delay after route sync
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Comprehensive verification of positioning and canvas state
+                const exportCenter = exportMap.getCenter();
+                const exportCanvas = exportMap.getCanvas();
+                
+                console.log('=== FINAL VERIFICATION ===');
+                console.log('On-screen center:', [map.getCenter().lng, map.getCenter().lat]);
+                console.log('Export center:', [exportCenter.lng, exportCenter.lat]);
+                console.log('Center difference (lng, lat):', 
+                    (exportCenter.lng - map.getCenter().lng).toFixed(8), 
+                    (exportCenter.lat - map.getCenter().lat).toFixed(8));
+                    
+                console.log('On-screen zoom:', map.getZoom().toFixed(6));
+                console.log('Export zoom:', exportMap.getZoom().toFixed(6));
+                console.log('Zoom difference:', (exportMap.getZoom() - map.getZoom()).toFixed(6));
+                
+                console.log('Expected canvas size:', exportCanvasWidth, 'x', exportCanvasHeight);
+                console.log('Actual export canvas size:', exportCanvas.width, 'x', exportCanvas.height);
+                console.log('Canvas size difference:', exportCanvas.width - exportCanvasWidth, exportCanvas.height - exportCanvasHeight);
+                
+                console.log('Export map loaded:', exportMap.loaded());
+                console.log('Export map style loaded:', exportMap.isStyleLoaded());
+                console.log('=== END VERIFICATION ===');
+                
+                const canvas = exportMap.getCanvas();
+                
+                console.log('Export canvas dimensions:', canvas.width, 'x', canvas.height);
+                console.log('Fixed 850x1100 export canvas ensures consistent output!');
+                
+                if (!canvas) {
+                    throw new Error('Map canvas not available');
+                }
+                
+                // Test if canvas can export data directly
+                let testDataUrl;
+                try {
+                    testDataUrl = canvas.toDataURL('image/png');
+                    console.log('Test export data URL length:', testDataUrl.length);
+                    
+                    if (testDataUrl.length < 1000) {
+                        throw new Error('Canvas appears to be blank - data URL too short');
+                    }
+                    
+                    console.log('Canvas export test successful - canvas has content');
+                } catch (e) {
+                    console.error('Canvas export test failed:', e);
+                    throw new Error('Canvas cannot be exported. Error: ' + e.message);
+                }
+                
+                showToast('🖨️ Creating your high-quality print (this may take a moment)...', 'success');
+                
+                // Check if pica is available for high-quality scaling
+                if (typeof pica === 'undefined') {
+                    throw new Error('Pica library not loaded. Please refresh the page.');
+                }
+                
+                // Since on-screen canvas is already 8.5:11 ratio, scale directly to final size
+                console.log('Scaling from', canvas.width, 'x', canvas.height, 'to', finalWidth, 'x', finalHeight);
+                
+                // Create final board-sized canvas (always 2550x3300 for 8.5"x11" at 300 DPI)
+                const boardCanvas = document.createElement('canvas');
+                boardCanvas.width = finalWidth;
+                boardCanvas.height = finalHeight;
+                
+                // Scale the captured canvas directly to final print size
+                await pica().resize(canvas, boardCanvas, {
+                    quality: 3,  // Highest quality
+                    alpha: true,
+                    unsharpAmount: 80,
+                    unsharpRadius: 0.6,
+                    unsharpThreshold: 2,
+                });
+                
+                // Convert to blob and add DPI metadata
+                const blob = await new Promise(resolve => {
+                    boardCanvas.toBlob(async (blob) => {
+                        try {
+                            // Convert blob to array buffer
+                            const arrayBuffer = await blob.arrayBuffer();
+                            const uint8Array = new Uint8Array(arrayBuffer);
+                            
+                            // Add pHYs chunk for DPI metadata (300 DPI = 11811 pixels per meter)
+                            const dpiMeters = Math.round(dpi * 39.3701); // Convert DPI to pixels per meter
+                            const modifiedPng = addPngDpiMetadata(uint8Array, dpiMeters);
+                            
+                            // Create new blob with DPI metadata
+                            resolve(new Blob([modifiedPng], { type: 'image/png' }));
+                        } catch (error) {
+                            console.warn('Could not add DPI metadata:', error);
+                            // Fall back to original blob
+                            resolve(blob);
+                        }
+                    }, 'image/png', 1.0);
+                });
+                
+                // Clean up export map and container
+                exportMap.remove();
+                document.body.removeChild(exportContainer);
+                
+                // Create download link
+                const link = document.createElement('a');
+                link.download = `gpx-route-${new Date().toISOString().split('T')[0]}-300dpi.png`;
+                link.href = URL.createObjectURL(blob);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                // Clean up object URL
+                setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+                
+                showToast('✅ Success! Your route is ready to print at 300 DPI quality', 'success', 4000);
+                
             } catch (error) {
-                console.error('Error during image export:', error);
-                showToast('Error exporting image: ' + error.message, 'error');
+                console.error('Error during 300 DPI export:', error);
+                showToast('❌ Export failed - please try again or check your internet connection', 'error', 5000);
             }
         });
     }
@@ -565,15 +1028,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Handle map resize
     window.addEventListener('resize', () => {
-        const mapContainer = document.getElementById('map');
-        mapContainer.style.height = `${window.innerHeight - 64}px`; // 4rem = 64px
-        map.resize();
-    });
-
-    // Set initial height
-    map.once('load', () => {
-        const mapContainer = document.getElementById('map');
-        mapContainer.style.height = `${window.innerHeight - 64}px`;
         map.resize();
     });
 

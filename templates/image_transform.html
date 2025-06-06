@@ -85,6 +85,9 @@
             
             const response = await fetch('/transform-image', {
                 method: 'POST',
+                headers: {
+                    'X-CSRFToken': '{{ csrf_token() }}'
+                },
                 body: formData
             });
             
