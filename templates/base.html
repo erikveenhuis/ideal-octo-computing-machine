@@ -80,7 +80,48 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center">
+                <div class="flex items-center space-x-1">
+                    <!-- Version info button -->
+                    <div class="relative">
+                        <button id="version-toggle" class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700" title="Version Information">
+                            <!-- Info icon -->
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                            </svg>
+                        </button>
+                        <!-- Version dropdown -->
+                        <div id="version-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                            <div class="p-4">
+                                <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Version Information</h3>
+                                <div class="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+                                    <div class="flex justify-between">
+                                        <span class="font-medium">Commit:</span>
+                                        <span id="version-commit" class="font-mono">Loading...</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="font-medium">Branch:</span>
+                                        <span id="version-branch">Loading...</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="font-medium">Author:</span>
+                                        <span id="version-author">Loading...</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="font-medium">Date:</span>
+                                        <span id="version-date">Loading...</span>
+                                    </div>
+                                    <div class="mt-3 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                        <span class="font-medium">Message:</span>
+                                        <p id="version-message" class="mt-1 text-gray-800 dark:text-gray-200 break-words">Loading...</p>
+                                    </div>
+                                </div>
+                                <div class="mt-3 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                    <a href="/version" class="text-xs text-blue-600 dark:text-blue-400 hover:underline">View JSON</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Dark mode toggle -->
                     <button id="theme-toggle" class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-4 focus:ring-gray-200 dark:focus:ring-gray-700">
                         <!-- Sun icon -->
@@ -202,6 +243,63 @@
                 });
             }, duration);
         }
+
+        // Load version information
+        function loadVersionInfo() {
+            fetch('/version')
+                .then(response => response.json())
+                .then(data => {
+                    // Update all version elements
+                    document.getElementById('version-commit').textContent = data.commit || 'unknown';
+                    document.getElementById('version-branch').textContent = data.branch || 'unknown';
+                    document.getElementById('version-author').textContent = data.author || 'unknown';
+                    document.getElementById('version-date').textContent = data.date ? new Date(data.date).toLocaleString() : 'unknown';
+                    document.getElementById('version-message').textContent = data.message || 'No commit message';
+                })
+                .catch(error => {
+                    console.warn('Could not load version info:', error);
+                    // Update elements to show error state
+                    ['version-commit', 'version-branch', 'version-author', 'version-date'].forEach(id => {
+                        const element = document.getElementById(id);
+                        if (element) element.textContent = 'unavailable';
+                    });
+                    const messageElement = document.getElementById('version-message');
+                    if (messageElement) messageElement.textContent = 'Version info unavailable';
+                });
+        }
+
+        // Version dropdown toggle functionality
+        function initVersionToggle() {
+            const versionToggle = document.getElementById('version-toggle');
+            const versionDropdown = document.getElementById('version-dropdown');
+
+            if (versionToggle && versionDropdown) {
+                versionToggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    versionDropdown.classList.toggle('hidden');
+                });
+
+                // Close dropdown when clicking outside
+                document.addEventListener('click', function(event) {
+                    if (!versionToggle.contains(event.target) && !versionDropdown.contains(event.target)) {
+                        versionDropdown.classList.add('hidden');
+                    }
+                });
+
+                // Close dropdown when pressing escape
+                document.addEventListener('keydown', function(event) {
+                    if (event.key === 'Escape') {
+                        versionDropdown.classList.add('hidden');
+                    }
+                });
+            }
+        }
+
+        // Load version info and init dropdown when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadVersionInfo();
+            initVersionToggle();
+        });
     </script>
 
     {% block extra_scripts %}{% endblock %}

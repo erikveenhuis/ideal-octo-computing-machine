@@ -24,7 +24,7 @@ from PIL import Image  # Still needed for logging available decoders
 from config import config, APIConstants
 from utils import (setup_logging, log_request_metrics,
                    safe_int, sanitize_search_input, combine_and_sort_results,
-                   validate_year_range, validate_github_webhook_payload)
+                   validate_year_range, validate_github_webhook_payload, get_git_commit_info)
 from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
@@ -419,20 +419,35 @@ def transform_image():
 @log_request_metrics
 def health_check():
     """Basic health check endpoint."""
+    git_info = get_git_commit_info()
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
-        'version': '1.0.0'
+        'version': '1.0.0',
+        'git': {
+            'commit': git_info.get('short_hash'),
+            'message': git_info.get('message'),
+            'branch': git_info.get('branch')
+        }
     })
 
 @app.route('/health/detailed')
 @log_request_metrics
 def detailed_health_check():
     """Detailed health check with service dependencies."""
+    git_info = get_git_commit_info()
     health_status = {
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
         'version': '1.0.0',
+        'git': {
+            'commit': git_info.get('hash'),
+            'short_commit': git_info.get('short_hash'),
+            'message': git_info.get('message'),
+            'date': git_info.get('date'),
+            'branch': git_info.get('branch'),
+            'author': git_info.get('author')
+        },
         'services': {}
     }
 
@@ -459,6 +474,21 @@ def detailed_health_check():
     health_status['status'] = 'healthy' if all_critical_services_ok else 'degraded'
 
     return jsonify(health_status)
+
+@app.route('/version')
+@log_request_metrics
+def version_info():
+    """Simple version endpoint showing current commit information."""
+    git_info = get_git_commit_info()
+    return jsonify({
+        'version': '1.0.0',
+        'commit': git_info.get('short_hash'),
+        'message': git_info.get('message'),
+        'date': git_info.get('date'),
+        'branch': git_info.get('branch'),
+        'author': git_info.get('author'),
+        'timestamp': datetime.utcnow().isoformat()
+    })
 
 if __name__ == '__main__':
     # Ensure required directories exist

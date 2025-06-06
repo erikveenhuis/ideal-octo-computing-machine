@@ -1,6 +1,7 @@
 """Utility functions for the Flask application."""
 import logging
 import os
+import subprocess
 from logging.handlers import RotatingFileHandler
 from functools import wraps
 import time
@@ -197,6 +198,76 @@ def get_expected_content_types_for_extension(extension: str) -> set:
     }
 
     return content_type_map.get(extension, set())
+
+def get_git_commit_info() -> Dict[str, Optional[str]]:
+    """
+    Get current Git commit information.
+    
+    Returns:
+        Dictionary containing commit hash, message, date, and branch
+    """
+    commit_info = {
+        'hash': None,
+        'short_hash': None,
+        'message': None,
+        'date': None,
+        'branch': None,
+        'author': None
+    }
+    
+    try:
+        # Get commit hash
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], 
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()
+        commit_info['hash'] = commit_hash
+        commit_info['short_hash'] = commit_hash[:7] if commit_hash else None
+        
+        # Get commit message
+        commit_message = subprocess.check_output(
+            ['git', 'log', '-1', '--pretty=%s'], 
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()
+        commit_info['message'] = commit_message
+        
+        # Get commit date
+        commit_date = subprocess.check_output(
+            ['git', 'log', '-1', '--pretty=%ci'], 
+            stderr=subprocess.DEVNULL,
+            text=True
+        ).strip()
+        commit_info['date'] = commit_date
+        
+        # Get current branch
+        try:
+            branch = subprocess.check_output(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], 
+                stderr=subprocess.DEVNULL,
+                text=True
+            ).strip()
+            commit_info['branch'] = branch
+        except subprocess.CalledProcessError:
+            commit_info['branch'] = 'unknown'
+            
+        # Get commit author
+        try:
+            author = subprocess.check_output(
+                ['git', 'log', '-1', '--pretty=%an'], 
+                stderr=subprocess.DEVNULL,
+                text=True
+            ).strip()
+            commit_info['author'] = author
+        except subprocess.CalledProcessError:
+            commit_info['author'] = 'unknown'
+            
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Git not available or not in a git repository
+        current_app.logger.warning("Could not retrieve Git commit information")
+    
+    return commit_info
 
 def validate_image_dimensions(image_size: tuple, max_dimension: int = None) -> bool:
     """
