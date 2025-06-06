@@ -84,13 +84,12 @@
             </button>
             <div class="sidebar-content p-4 h-[calc(100%-3rem)]">
                 <div class="flex flex-col h-full">
-                    <div class="upload-section flex-shrink-0">
+                    <div class="upload-section flex-shrink-0 mb-4">
                         <h2 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Upload GPX File</h2>
                         <form id="uploadForm">
                             <input type="file" id="gpxFile" accept=".gpx" required
                                 class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
                         </form>
-                        <div id="message" class="mt-2"></div>
                     </div>
 
                     <div class="controls space-y-2 flex-shrink-0">
@@ -125,12 +124,13 @@
                                 class="w-40 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
                                 <option value="forex" selected>Forex</option>
                                 <option value="plexiglas">Plexiglas</option>
+                                <option value="plexiglas_black">Plexiglas Black</option>
                             </select>
                         </div>
 
                         <button id="saveImageBtn" 
                             class="w-full px-4 py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-md hover:bg-gray-800 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
-                            Save as Image
+                            Save as PNG
                         </button>
                     </div>
                 </div>
@@ -147,27 +147,102 @@
 {% block extra_scripts %}
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.js"></script>
 <script>
+document.addEventListener('DOMContentLoaded', function() {
     // Set the access token
     mapboxgl.accessToken = '{{ config.MAPBOX_ACCESS_TOKEN }}';
 
     const mapStyles = {
         'forex': 'mapbox://styles/erikveenhuis/cmb9e07eg00ui01sd37h67oui',
-        'plexiglas': 'mapbox://styles/erikveenhuis/cmb9esh6700u701r41sxu3dnr'
+        'plexiglas': 'mapbox://styles/erikveenhuis/cmb9esh6700u701r41sxu3dnr',
+        'plexiglas_black': 'mapbox://styles/erikveenhuis/cmbkgyte200or01s5dtabce0c'
     };
 
     // Initialize the map
     const map = new mapboxgl.Map({
         container: 'map',
-        style: mapStyles['forex'],
+        // The style is set dynamically below to apply necessary runtime fixes.
         center: [5.2913, 52.1326], // Note: Mapbox uses [lng, lat] order
         zoom: 7,
         attributionControl: true
     });
 
+    async function setAndFixStyle(styleUrl) {
+        // Convert mapbox:// URL to a fetchable URL for the Styles API
+        const styleId = styleUrl.replace('mapbox://styles/', '');
+        const fetchUrl = `https://api.mapbox.com/styles/v1/${styleId}?access_token=${mapboxgl.accessToken}`;
+
+        try {
+            const response = await fetch(fetchUrl);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch style: ${response.statusText}`);
+            }
+            const style = await response.json();
+
+            // Recursively traverse the style object to fix expressions that expect a 'len' property.
+            // This prevents rendering errors when base map features don't have this property.
+            function fixLenExpression(obj) {
+                if (Array.isArray(obj)) {
+                    // Find the problematic ["get", "len"] expression
+                    if (obj.length === 2 && obj[0] === 'get' && obj[1] === 'len') {
+                        // Replace it with a 'coalesce' expression to provide a fallback value of 0.
+                        return ['coalesce', ['get', 'len'], 0];
+                    }
+                    return obj.map(fixLenExpression);
+                }
+                if (obj !== null && typeof obj === 'object') {
+                    const newObj = {};
+                    for (const key in obj) {
+                        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                           newObj[key] = fixLenExpression(obj[key]);
+                        }
+                    }
+                    return newObj;
+                }
+                return obj; // Return primitive values as-is
+            }
+
+            const modifiedStyle = fixLenExpression(style);
+            map.setStyle(modifiedStyle);
+
+        } catch (error) {
+            console.error('Error loading or modifying map style:', error);
+            // As a fallback, try to set the original style URL if modification fails.
+            map.setStyle(styleUrl);
+        }
+    }
+
+    // Handle missing images in the style, like 'marker'. This prevents errors when a style
+    // references an image that is not in its sprite sheet.
+    map.on('styleimagemissing', (e) => {
+        const id = e.id;
+        // Create a dummy 1x1 transparent image to prevent errors.
+        const width = 1;
+        const height = 1;
+        const data = new Uint8Array(width * height * 4);
+        map.addImage(id, { width, height, data });
+    });
+
     let currentStyle = 'forex';
     let routeSource = null;
     let routeLayer = null;
+    let markersSource = null;
     let showMarkers = true;
+
+    function cleanupMapData() {
+        // Remove layers in reverse order of dependency
+        if (map.getLayer('marker-circles')) map.removeLayer('marker-circles');
+        if (map.getLayer('markers')) map.removeLayer('markers');
+        if (map.getLayer('route')) map.removeLayer('route');
+
+        // Remove sources after their dependent layers are gone
+        if (map.getSource('markers')) map.removeSource('markers');
+        if (map.getSource('route')) map.removeSource('route');
+
+        // Reset state variables
+        routeSource = null;
+        routeLayer = null;
+        markersSource = null;
+    }
 
     // Add navigation controls
     map.addControl(new mapboxgl.NavigationControl());
@@ -175,11 +250,9 @@
     // Handle file upload
     document.getElementById('gpxFile').addEventListener('change', async (e) => {
         const fileInput = e.target;
-        const messageDiv = document.getElementById('message');
         
         if (!fileInput.files.length) {
-            messageDiv.className = 'error';
-            messageDiv.textContent = 'Please select a file';
+            showToast('Please select a file', 'error');
             return;
         }
 
@@ -187,6 +260,9 @@
         formData.append('gpx_file', fileInput.files[0]);
 
         try {
+            // Ensure the map is clean before adding new data.
+            cleanupMapData();
+
             const response = await fetch('/upload-gpx', {
                 method: 'POST',
                 body: formData
@@ -195,18 +271,8 @@
             const data = await response.json();
             
             if (data.error) {
-                messageDiv.className = 'error';
-                messageDiv.textContent = data.error;
+                showToast(data.error, 'error');
                 return;
-            }
-
-            // Clear previous route and markers
-            if (routeSource) {
-                map.removeLayer('route');
-                map.removeSource('route');
-            }
-            if (map.getSource('markers')) {
-                map.removeSource('markers');
             }
 
             // Create GeoJSON for the route
@@ -248,7 +314,7 @@
                 const routeColor = document.getElementById('routeColor').value;
                 
                 // Create GeoJSON for markers
-                const markersSource = {
+                markersSource = {
                     type: 'geojson',
                     data: {
                         type: 'FeatureCollection',
@@ -302,7 +368,8 @@
                         'text-field': ['get', 'marker-symbol'],
                         'text-size': 12,
                         'text-anchor': 'center',
-                        'text-allow-overlap': true
+                        'text-allow-overlap': true,
+                        'icon-image': 'none'
                     },
                     paint: {
                         'text-color': '#ffffff'
@@ -332,11 +399,9 @@
                 maxZoom: 15
             });
 
-            messageDiv.className = 'success';
-            messageDiv.textContent = 'Route loaded successfully!';
+            showToast('Route loaded successfully!', 'success');
         } catch (error) {
-            messageDiv.className = 'error';
-            messageDiv.textContent = 'Error loading GPX file: ' + error.message;
+            showToast('Error loading GPX file: ' + error.message, 'error');
         }
     });
 
@@ -360,6 +425,51 @@
         if (routeLayer) {
             map.setPaintProperty('route', 'line-width', parseInt(this.value, 10));
         }
+    });
+
+    // Handle map style change
+    document.getElementById('mapStyle').addEventListener('change', function() {
+        const newStyle = this.value;
+        setAndFixStyle(mapStyles[newStyle]);
+        currentStyle = newStyle;
+    });
+
+    map.on('styledata', () => {
+        // When a new style is loaded, re-add the route and markers if they exist.
+        if (routeSource && !map.getSource('route')) {
+            map.addSource('route', routeSource);
+            map.addLayer(routeLayer);
+        }
+        if (showMarkers && markersSource && !map.getSource('markers')) {
+            map.addSource('markers', markersSource);
+            map.addLayer({
+                id: 'marker-circles',
+                type: 'circle',
+                source: 'markers',
+                paint: {
+                    'circle-radius': 10,
+                    'circle-color': ['get', 'marker-color']
+                }
+            });
+            map.addLayer({
+                id: 'markers',
+                type: 'symbol',
+                source: 'markers',
+                layout: {
+                    'text-field': ['get', 'marker-symbol'],
+                    'text-size': 12,
+                    'text-anchor': 'center',
+                    'text-allow-overlap': true,
+                    'icon-image': 'none'
+                },
+                paint: {
+                    'text-color': '#ffffff'
+                }
+            });
+        }
+        setTimeout(() => {
+            map.resize();
+        }, 300);
     });
 
     // Handle marker toggle
@@ -392,13 +502,9 @@
     if (!saveImageBtn) {
         console.error('Save as Image button not found!');
     } else {
-        console.log('Save as Image button found, attaching click handler');
         saveImageBtn.addEventListener('click', async function() {
-            console.log('Save as Image button clicked');
             
             try {
-                // Calculate dimensions for 8.5x11 aspect ratio at 300 DPI
-                const targetRatio = 11/8.5; // 1.294
                 const dpi = 300;
                 let width, height;
                 
@@ -408,44 +514,26 @@
                 
                 try {
                     // Wait for the map to finish rendering
-                    map.once('idle', () => {
-                        // Get the map's canvas
+                    map.once('idle', async () => {
                         const canvas = map.getCanvas();
-                        
-                        // Create a temporary canvas with the correct dimensions
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = width;
-                        tempCanvas.height = height;
-                        const ctx = tempCanvas.getContext('2d', { alpha: false });
-                        
-                        // Set high-quality rendering
-                        ctx.imageSmoothingEnabled = true;
-                        ctx.imageSmoothingQuality = 'high';
-                        
-                        // Calculate the scaling to maintain aspect ratio
-                        const scale = Math.min(
-                            width / canvas.width,
-                            height / canvas.height
-                        );
-                        
-                        // Calculate the centered position
-                        const scaledWidth = canvas.width * scale;
-                        const scaledHeight = canvas.height * scale;
-                        const x = (width - scaledWidth) / 2;
-                        const y = (height - scaledHeight) / 2;
-                        
-                        // Draw the map canvas onto our temporary canvas with high quality
-                        ctx.drawImage(canvas, x, y, scaledWidth, scaledHeight);
-                        
-                        // Convert to PNG with maximum quality
+                        const offscreenCanvas = document.createElement('canvas');
+                        offscreenCanvas.width = width;
+                        offscreenCanvas.height = height;
+
+                        await pica().resize(canvas, offscreenCanvas, {
+                            unsharpAmount: 80,
+                            unsharpRadius: 0.6,
+                            unsharpThreshold: 2,
+                        });
+
                         const link = document.createElement('a');
                         link.download = 'map.png';
-                        link.href = tempCanvas.toDataURL('image/png', 1.0); // Maximum quality
+                        link.href = offscreenCanvas.toDataURL('image/png', 1.0);
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
                         
-                        console.log('Map canvas captured and downloaded with 300 DPI');
+                        showToast(`Map canvas captured and downloaded with ${dpi} DPI`, 'success');
                     });
                     
                     // Force a render to ensure we capture the latest state
@@ -453,9 +541,11 @@
                     
                 } catch (error) {
                     console.error('Error capturing map canvas:', error);
+                    showToast('Error capturing map: ' + error.message, 'error');
                 }
             } catch (error) {
                 console.error('Error during image export:', error);
+                showToast('Error exporting image: ' + error.message, 'error');
             }
         });
     }
@@ -486,5 +576,9 @@
         mapContainer.style.height = `${window.innerHeight - 64}px`;
         map.resize();
     });
+
+    // Initial style load
+    setAndFixStyle(mapStyles[currentStyle]);
+});
 </script>
 {% endblock %} 
