@@ -257,6 +257,7 @@ def verify_github_webhook(payload, signature):
     return hmac.compare_digest(signature, expected_signature)
 
 @app.route('/webhook', methods=['POST'])
+@csrf.exempt
 @limiter.limit(app.config['WEBHOOK_RATE_LIMIT'])
 @log_request_metrics
 def github_webhook():
