@@ -25,7 +25,9 @@ from config import config, APIConstants, FileExtensions
 from utils import (setup_logging, log_api_request, log_api_error, log_request_metrics, 
                    safe_int, validate_file_extension, sanitize_search_input, 
                    combine_and_sort_results, validate_year_range, validate_file_size,
-                   validate_content_type, get_expected_content_types_for_extension)
+                   validate_content_type, get_expected_content_types_for_extension,
+                   validate_image_dimensions, calculate_image_memory_usage,
+                   validate_github_webhook_payload)
 from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
@@ -293,6 +295,26 @@ def github_webhook():
         # Get the event type
         event_type = request.headers.get('X-GitHub-Event')
         
+        # Parse and validate the payload structure
+        try:
+            payload = request.get_json()
+            if payload is None:
+                app.logger.warning("Webhook payload is not valid JSON")
+                return jsonify({'error': 'Invalid JSON payload'}), 400
+        except Exception as e:
+            app.logger.warning(f"Failed to parse webhook JSON payload: {str(e)}")
+            return jsonify({'error': 'Invalid JSON payload'}), 400
+        
+        # Validate webhook payload structure
+        if not validate_github_webhook_payload(payload, event_type):
+            app.logger.warning(f"Invalid webhook payload structure for event type: {event_type}")
+            return jsonify({'error': 'Invalid payload structure'}), 400
+        
+        # Log webhook details for monitoring
+        repository_name = payload.get('repository', {}).get('full_name', 'unknown')
+        sender_login = payload.get('sender', {}).get('login', 'unknown')
+        app.logger.info(f"Valid webhook received - Event: {event_type}, Repo: {repository_name}, Sender: {sender_login}")
+        
         if event_type == 'push':
             # Start with a quick response to prevent timeout
             response = jsonify({
@@ -429,6 +451,19 @@ def transform_image():
             app.logger.debug("Attempting to open image...")
             img = Image.open(input_stream)
             app.logger.info(f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}")
+            
+            # Validate image dimensions for security
+            if not validate_image_dimensions(img.size):
+                max_dim = APIConstants.MAX_IMAGE_DIMENSION
+                raise FileUploadError(
+                    f'Image dimensions too large. Maximum allowed is {max_dim}x{max_dim} pixels. '
+                    f'Your image is {img.size[0]}x{img.size[1]} pixels.', 
+                    file.filename
+                )
+            
+            # Log memory usage estimate for monitoring
+            memory_usage = calculate_image_memory_usage(img.size, 4 if img.mode == 'RGBA' else 3)
+            app.logger.info(f"Estimated image memory usage: {memory_usage / (1024*1024):.2f} MB")
             
             # Apply EXIF orientation if present
             try:

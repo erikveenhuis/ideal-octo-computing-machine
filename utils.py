@@ -192,4 +192,120 @@ def get_expected_content_types_for_extension(extension: str) -> set:
         'gpx': {'application/gpx+xml', 'text/xml', 'application/xml', 'text/plain'}
     }
     
-    return content_type_map.get(extension, set()) 
+    return content_type_map.get(extension, set())
+
+def validate_image_dimensions(image_size: tuple, max_dimension: int = None) -> bool:
+    """
+    Validate image dimensions against maximum allowed size.
+    
+    Args:
+        image_size: Tuple of (width, height) in pixels
+        max_dimension: Maximum allowed dimension in pixels
+        
+    Returns:
+        True if image dimensions are valid, False otherwise
+    """
+    if max_dimension is None:
+        from config import APIConstants
+        max_dimension = APIConstants.MAX_IMAGE_DIMENSION
+    
+    width, height = image_size
+    return (width <= max_dimension and height <= max_dimension and 
+            width > 0 and height > 0)
+
+def calculate_image_memory_usage(image_size: tuple, channels: int = 4) -> int:
+    """
+    Calculate approximate memory usage for an image in bytes.
+    
+    Args:
+        image_size: Tuple of (width, height) in pixels
+        channels: Number of color channels (4 for RGBA, 3 for RGB)
+        
+    Returns:
+        Estimated memory usage in bytes
+    """
+    width, height = image_size
+    return width * height * channels
+
+def validate_github_webhook_payload(payload: Dict[str, Any], event_type: str) -> bool:
+    """
+    Validate GitHub webhook payload structure.
+    
+    Args:
+        payload: The webhook payload dictionary
+        event_type: The GitHub event type (e.g., 'push', 'pull_request')
+        
+    Returns:
+        True if payload structure is valid, False otherwise
+    """
+    if not isinstance(payload, dict):
+        return False
+    
+    # Common required fields for all webhook events
+    required_common_fields = ['repository', 'sender']
+    
+    for field in required_common_fields:
+        if field not in payload:
+            current_app.logger.warning(f"Missing required field '{field}' in webhook payload")
+            return False
+    
+    # Validate repository structure
+    repository = payload.get('repository', {})
+    if not isinstance(repository, dict) or 'name' not in repository or 'full_name' not in repository:
+        current_app.logger.warning("Invalid repository structure in webhook payload")
+        return False
+    
+    # Validate sender structure
+    sender = payload.get('sender', {})
+    if not isinstance(sender, dict) or 'login' not in sender:
+        current_app.logger.warning("Invalid sender structure in webhook payload")
+        return False
+    
+    # Event-specific validation
+    if event_type == 'push':
+        return _validate_push_payload(payload)
+    elif event_type == 'pull_request':
+        return _validate_pull_request_payload(payload)
+    
+    # For unknown event types, basic validation is sufficient
+    return True
+
+def _validate_push_payload(payload: Dict[str, Any]) -> bool:
+    """Validate push event specific payload structure."""
+    required_push_fields = ['ref', 'commits', 'head_commit']
+    
+    for field in required_push_fields:
+        if field not in payload:
+            current_app.logger.warning(f"Missing required push field '{field}' in webhook payload")
+            return False
+    
+    # Validate ref format (should be refs/heads/branch-name)
+    ref = payload.get('ref', '')
+    if not isinstance(ref, str) or not ref.startswith('refs/'):
+        current_app.logger.warning(f"Invalid ref format in push payload: {ref}")
+        return False
+    
+    # Validate commits is a list
+    commits = payload.get('commits', [])
+    if not isinstance(commits, list):
+        current_app.logger.warning("Commits field must be a list in push payload")
+        return False
+    
+    return True
+
+def _validate_pull_request_payload(payload: Dict[str, Any]) -> bool:
+    """Validate pull request event specific payload structure."""
+    required_pr_fields = ['action', 'pull_request']
+    
+    for field in required_pr_fields:
+        if field not in payload:
+            current_app.logger.warning(f"Missing required pull_request field '{field}' in webhook payload")
+            return False
+    
+    # Validate pull_request structure
+    pr = payload.get('pull_request', {})
+    if not isinstance(pr, dict) or 'number' not in pr or 'state' not in pr:
+        current_app.logger.warning("Invalid pull_request structure in webhook payload")
+        return False
+    
+    return True 
