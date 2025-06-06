@@ -97,8 +97,23 @@ def get_uitslagen_results(name):
         soup = BeautifulSoup(response.text, 'lxml')
         results = []
         
-        # Find all result sections
+        # Check if search is temporarily disabled
+        error_message = soup.find('div', style=lambda x: x and 'background-color:#ffcccc' in x)
+        if error_message:
+            error_text = error_message.get_text(strip=True)
+            if 'tijdelijk even niet beschikbaar' in error_text or 'temporarily unavailable' in error_text.lower():
+                app.logger.warning(f"{source} search is temporarily disabled: {error_text}")
+                raise APIError(f"Search on {source} is temporarily disabled. Try the Uitslagen.nl mobile app instead.", source, 503)
+        
+        # Find all result sections (try multiple possible selectors)
         result_sections = soup.find_all('div', class_='zk-kader')
+        if not result_sections:
+            # Try alternative selectors if the structure has changed
+            result_sections = soup.find_all('div', class_=['result-item', 'result-section', 'zoekresultaat'])
+            if not result_sections:
+                # Look for table-based results
+                result_sections = soup.find_all('table', class_=['result-table', 'zoekresultaat-tabel'])
+        
         app.logger.info(f"Found {len(result_sections)} result sections from {source}")
         
         # Process each result section
@@ -306,6 +321,7 @@ def search():
         # Initialize results
         sporthive_results = []
         uitslagen_results = []
+        api_errors = []
         
         # Fetch results from both sources (continue even if one fails)
         try:
@@ -315,7 +331,7 @@ def search():
                 result['source'] = 'Sporthive'
         except APIError as e:
             app.logger.warning(f"Sporthive API failed: {e.message}")
-            # Continue with other source
+            api_errors.append(f"Sporthive: {e.message}")
         
         try:
             uitslagen_results = get_uitslagen_results(name)
@@ -324,7 +340,7 @@ def search():
                 result['source'] = 'Uitslagen.nl'
         except APIError as e:
             app.logger.warning(f"Uitslagen API failed: {e.message}")
-            # Continue with results from other source
+            api_errors.append(f"Uitslagen.nl: {e.message}")
         
         # Combine results
         all_results = sporthive_results + uitslagen_results
@@ -336,7 +352,7 @@ def search():
             app.logger.warning(f"Error sorting results: {e}")
             # Continue with unsorted results
         
-        return render_template('results.html', name=name, year=year, results=all_results)
+        return render_template('results.html', name=name, year=year, results=all_results, api_errors=api_errors)
     
     except ValidationError:
         raise  # Re-raise validation errors
