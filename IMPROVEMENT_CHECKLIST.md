@@ -46,9 +46,9 @@
 - [ ] 33. Add analytics/usage tracking
 
 ## 🔧 **Additional Code Quality Improvements** *(Identified in Review)*
-- [ ] 34. Extract image transformation logic to separate service
+- [x] 34. Extract image transformation logic to separate service
 - [ ] 35. Break down large webhook deployment function
-- [ ] 36. Create GPX processing service from upload function  
+- [x] 36. Create GPX processing service from upload function  
 - [x] 37. Replace config file extensions with FileExtensions constants
 - [ ] 38. Extract JavaScript from HTML templates to separate files
 - [ ] 39. Create reusable JavaScript modules for map functionality

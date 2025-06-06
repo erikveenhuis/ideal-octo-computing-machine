@@ -1,5 +1,9 @@
 import os
 from datetime import timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class Config:
     """Base configuration class."""
@@ -110,7 +114,7 @@ class APIConstants:
     EXPECTED_RESULT_COLUMNS = 7
     
     # Image processing
-    MAX_IMAGE_DIMENSION = 2048
+    MAX_IMAGE_DIMENSION = 4096  # Increased to handle larger images like 2550x3300
     DEFAULT_IMAGE_QUALITY = 85
 
 # URL patterns and endpoints

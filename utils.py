@@ -189,7 +189,7 @@ def get_expected_content_types_for_extension(extension: str) -> set:
         'avif': {'image/avif'},
         
         # GPX types  
-        'gpx': {'application/gpx+xml', 'text/xml', 'application/xml', 'text/plain'}
+        'gpx': {'application/gpx+xml', 'text/xml', 'application/xml', 'text/plain', 'application/octet-stream'}
     }
     
     return content_type_map.get(extension, set())

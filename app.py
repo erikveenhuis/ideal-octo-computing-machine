@@ -7,30 +7,23 @@ import requests
 import urllib.parse
 import os
 from bs4 import BeautifulSoup
-import gpxpy
-import gpxpy.gpx
 import hmac
 import hashlib
-import replicate
-import tempfile
-from PIL import Image
-import io
-import pillow_avif  # Ensure AVIF support is loaded
 import subprocess
 import time
 from datetime import datetime
+from PIL import Image  # Still needed for logging available decoders
 
 # Import our custom modules
 from config import config, APIConstants, FileExtensions
 from utils import (setup_logging, log_api_request, log_api_error, log_request_metrics, 
-                   safe_int, validate_file_extension, sanitize_search_input, 
-                   combine_and_sort_results, validate_year_range, validate_file_size,
-                   validate_content_type, get_expected_content_types_for_extension,
-                   validate_image_dimensions, calculate_image_memory_usage,
-                   validate_github_webhook_payload)
+                   safe_int, sanitize_search_input, combine_and_sort_results, 
+                   validate_year_range, validate_github_webhook_payload)
 from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
+from services.image_transform_service import ImageTransformService
+from services.gpx_processing_service import GPXProcessingService
 
 def create_app(config_name=None):
     """Application factory pattern."""
@@ -81,6 +74,16 @@ sporthive_service = SporthiveService(
     default_country=app.config['DEFAULT_COUNTRY_CODE'],
     default_offset=app.config['DEFAULT_RESULT_OFFSET']
 )
+
+# Initialize image transformation service
+image_transform_service = ImageTransformService(
+    replicate_api_token=app.config['REPLICATE_API_TOKEN'],
+    replicate_model=app.config['REPLICATE_MODEL'],
+    transform_prompt=app.config['IMAGE_TRANSFORM_PROMPT']
+)
+
+# Initialize GPX processing service
+gpx_processing_service = GPXProcessingService()
 
 # Configure API tokens from config
 if not app.config['REPLICATE_API_TOKEN']:
@@ -192,70 +195,35 @@ def gpx_upload():
 @log_request_metrics
 def upload_gpx():
     """Handles GPX file upload and returns the track data."""
-    if 'gpx_file' not in request.files:
-        raise FileUploadError('No file uploaded')
-    
-    file = request.files['gpx_file']
-    if file.filename == '':
-        raise FileUploadError('No file selected')
-    
-    # Validate file extension
-    if not validate_file_extension(file.filename, FileExtensions.GPX_EXTENSIONS):
-        raise FileUploadError('File must be a GPX file', file.filename)
-    
-    # Get file extension for content-type validation
-    file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-    expected_content_types = get_expected_content_types_for_extension(file_extension)
-    
-    # Validate content type
-    if not validate_content_type(file.content_type, expected_content_types):
-        raise FileUploadError(
-            f'Invalid file type. Expected GPX file but received {file.content_type}', 
-            file.filename
-        )
-    
-    # Read file content to validate size
-    file_content = file.read()
-    if not file_content:
-        raise FileUploadError('Empty file uploaded', file.filename)
-    
-    # Validate file size
-    if not validate_file_size(len(file_content), APIConstants.MAX_FILE_SIZE_BYTES):
-        max_size_mb = APIConstants.MAX_FILE_SIZE_MB
-        raise FileUploadError(
-            f'File too large. Maximum size is {max_size_mb}MB', 
-            file.filename
-        )
-    
-    # Reset file pointer for processing
-    file.seek(0)
-    
     try:
-        # Log file processing
-        app.logger.info(f"Processing GPX file: {file.filename}")
+        if 'gpx_file' not in request.files:
+            raise FileUploadError('No file uploaded')
         
-        gpx = gpxpy.parse(file)
-        track_points = []
+        file = request.files['gpx_file']
+        if file.filename == '':
+            raise FileUploadError('No file selected')
         
-        for track in gpx.tracks:
-            for segment in track.segments:
-                for point in segment.points:
-                    track_points.append({
-                        'lat': point.latitude,
-                        'lon': point.longitude,
-                        'elevation': point.elevation,
-                        'time': point.time.isoformat() if point.time else None
-                    })
+        # Read file content for validation
+        file_content = file.read()
         
-        app.logger.info(f"Successfully processed GPX file with {len(track_points)} points")
+        # Reset file pointer for processing
+        file.seek(0)
         
-        return jsonify({
-            'success': True,
-            'track_points': track_points
-        })
+        # Use the GPX processing service to handle the upload
+        result = gpx_processing_service.process_gpx_upload(
+            filename=file.filename,
+            content_type=file.content_type,
+            file_content=file_content,
+            file_stream=file,
+            include_metadata=False  # Can be made configurable if needed
+        )
+        
+        return jsonify(result)
+        
     except Exception as e:
-        app.logger.error(f"Error processing GPX file {file.filename}: {str(e)}")
-        raise FileUploadError(f"Error processing GPX file: {str(e)}", file.filename)
+        app.logger.error(f"Error in GPX upload: {str(e)}")
+        # Return JSON error instead of letting Flask return HTML error page
+        return jsonify({'error': f'GPX upload failed: {str(e)}'}), 500
 
 def verify_github_webhook(payload, signature):
     """Verify that the webhook request came from GitHub."""
@@ -392,7 +360,7 @@ def github_webhook():
 @log_request_metrics
 def image_transform():
     """Renders the image transformation page."""
-    if not app.config['REPLICATE_API_TOKEN']:
+    if not image_transform_service.is_available():
         raise APIError("Image transformation service not configured", "Configuration", 503)
     return render_template('image_transform.html')
 
@@ -401,140 +369,30 @@ def image_transform():
 @log_request_metrics
 def transform_image():
     """Handles image upload and transformation."""
-    if not app.config['REPLICATE_API_TOKEN']:
-        raise APIError('Image transformation service not configured', 'Configuration', 503)
-        
-    if 'file' not in request.files:
-        raise FileUploadError('No file uploaded')
-    
-    file = request.files['file']
-    if file.filename == '':
-        raise FileUploadError('No file selected')
-    
-    # Validate file extension
-    if not validate_file_extension(file.filename, FileExtensions.IMAGE_EXTENSIONS):
-        raise FileUploadError('File must be a valid image file', file.filename)
-    
-    # Get file extension for content-type validation
-    file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
-    expected_content_types = get_expected_content_types_for_extension(file_extension)
-    
-    # Validate content type
-    if not validate_content_type(file.content_type, expected_content_types):
-        raise FileUploadError(
-            f'Invalid file type. Expected image file but received {file.content_type}', 
-            file.filename
-        )
-    
     try:
-        # Read the file content into memory
+        if 'file' not in request.files:
+            raise FileUploadError('No file uploaded')
+        
+        file = request.files['file']
+        if file.filename == '':
+            raise FileUploadError('No file selected')
+        
+        # Read the file content
         file_content = file.read()
-        if not file_content:
-            raise FileUploadError('Empty file uploaded', file.filename)
         
-        # Validate file size
-        if not validate_file_size(len(file_content), APIConstants.MAX_FILE_SIZE_BYTES):
-            max_size_mb = APIConstants.MAX_FILE_SIZE_MB
-            raise FileUploadError(
-                f'File too large. Maximum size is {max_size_mb}MB', 
-                file.filename
-            )
-
-        app.logger.info(f"Processing image: {file.filename} ({len(file_content)} bytes, {file.content_type})")
-
-        # Create BytesIO objects for the conversion process
-        input_stream = io.BytesIO(file_content)
-        output_stream = io.BytesIO()
+        # Use the image transformation service to process the upload
+        result = image_transform_service.process_image_upload(
+            filename=file.filename,
+            content_type=file.content_type,
+            file_content=file_content
+        )
         
-        try:
-            # Try to open and convert the image
-            app.logger.debug("Attempting to open image...")
-            img = Image.open(input_stream)
-            app.logger.info(f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}")
-            
-            # Validate image dimensions for security
-            if not validate_image_dimensions(img.size):
-                max_dim = APIConstants.MAX_IMAGE_DIMENSION
-                raise FileUploadError(
-                    f'Image dimensions too large. Maximum allowed is {max_dim}x{max_dim} pixels. '
-                    f'Your image is {img.size[0]}x{img.size[1]} pixels.', 
-                    file.filename
-                )
-            
-            # Log memory usage estimate for monitoring
-            memory_usage = calculate_image_memory_usage(img.size, 4 if img.mode == 'RGBA' else 3)
-            app.logger.info(f"Estimated image memory usage: {memory_usage / (1024*1024):.2f} MB")
-            
-            # Apply EXIF orientation if present
-            try:
-                if hasattr(img, '_getexif') and img._getexif() is not None:
-                    exif = dict(img._getexif().items())
-                    if 274 in exif:  # 274 is the orientation tag
-                        orientation = exif[274]
-                        if orientation == 3:
-                            img = img.rotate(180, expand=True)
-                        elif orientation == 6:
-                            img = img.rotate(270, expand=True)
-                        elif orientation == 8:
-                            img = img.rotate(90, expand=True)
-            except Exception as e:
-                app.logger.warning(f"Could not process EXIF orientation: {e}")
-            
-            # Convert to RGB if necessary
-            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                app.logger.debug(f"Converting from {img.mode} to RGB")
-                img = img.convert('RGB')
-            
-            # Save as PNG to the output stream
-            app.logger.debug("Saving as PNG...")
-            img.save(output_stream, format='PNG')
-            output_stream.seek(0)  # Reset stream position to beginning
-            app.logger.debug(f"Output stream size: {len(output_stream.getvalue())} bytes")
-            
-            # Call Replicate API with latent-consistency-model
-            input = {
-                "seed": -1,
-                "image": output_stream,
-                "width": 768,
-                "height": 768,
-                "prompt": app.config['IMAGE_TRANSFORM_PROMPT'],
-                "num_images": 1,
-                "guidance_scale": 6,  # Increased to emphasize white background
-                "archive_outputs": False,
-                "prompt_strength": 0.4,  # Increased to allow more background change
-                "sizing_strategy": "input_image",
-                "lcm_origin_steps": 50,
-                "canny_low_threshold": 100,
-                "num_inference_steps": 4,
-                "canny_high_threshold": 200,
-                "control_guidance_end": 1,
-                "control_guidance_start": 0,
-                "controlnet_conditioning_scale": 2  # Reduced to allow more background change
-            }
-            
-            app.logger.info("Calling Replicate API...")
-            output = replicate.run(
-                app.config['REPLICATE_MODEL'],
-                input=input
-            )
-            app.logger.info(f"Replicate API response received: {len(output) if output else 0} results")
-            
-            # The output is a list of URLs
-            if output and len(output) > 0:
-                # Convert the output to a string URL if it's not already
-                image_url = str(output[0])
-                app.logger.info(f"Successfully generated image: {image_url}")
-                return jsonify({'image_url': image_url})
-            else:
-                raise APIError('No output generated from image transformation', 'Replicate', 500)
-                
-        except Exception as e:
-            app.logger.error(f"Error processing image {file.filename}: {str(e)}")
-            raise FileUploadError(f'Error processing image file: {str(e)}', file.filename)
-            
+        return jsonify(result)
+        
     except Exception as e:
-        app.logger.error(f"Error during image transformation: {str(e)}")
-        raise APIError(f"Image transformation failed: {str(e)}", "Image Transform", 500)
+        app.logger.error(f"Error in image transformation: {str(e)}")
+        # Return JSON error instead of letting Flask return HTML error page
+        return jsonify({'error': f'Image transformation failed: {str(e)}'}), 500
 
 @app.route('/health')
 @log_request_metrics
@@ -557,10 +415,10 @@ def detailed_health_check():
         'services': {}
     }
     
-    # Check Replicate API
+    # Check Replicate API (via image transform service)
     health_status['services']['replicate'] = {
-        'configured': bool(app.config['REPLICATE_API_TOKEN']),
-        'status': 'available' if app.config['REPLICATE_API_TOKEN'] else 'unavailable'
+        'configured': image_transform_service.is_available(),
+        'status': 'available' if image_transform_service.is_available() else 'unavailable'
     }
     
     # Check Mapbox
