@@ -258,6 +258,7 @@ def verify_github_webhook(payload, signature):
 
 @app.route('/webhook', methods=['POST'])
 @limiter.limit(app.config['WEBHOOK_RATE_LIMIT'])
+@csrf.exempt  # Exempt webhook from CSRF protection as it's called by GitHub
 @log_request_metrics
 def github_webhook():
     """Handle GitHub webhook events."""
