@@ -288,8 +288,8 @@ class GPXProcessingService:
         for point in track_points[:min(100, len(track_points))]:  # Sample first 100 points
             lat_str = str(point['lat'])
             lon_str = str(point['lon'])
-            lat_decimals = len(lat_str.split('.')[-1]) if '.' in lat_str else 0
-            lon_decimals = len(lon_str.split('.')[-1]) if '.' in lon_str else 0
+            lat_decimals = len(lat_str.split('.', maxsplit=1)[-1]) if '.' in lat_str else 0
+            lon_decimals = len(lon_str.split('.', maxsplit=1)[-1]) if '.' in lon_str else 0
             precision_sum += (lat_decimals + lon_decimals) / 2
 
         avg_precision = precision_sum / min(100, len(track_points))
@@ -404,8 +404,7 @@ class GPXProcessingService:
 
     def _interpolate_missing_timestamps(self, track_points: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Interpolate missing timestamps for better temporal continuity."""
-        from datetime import datetime, timedelta
-        import re
+        from datetime import datetime
 
         points_with_time = [(i, p) for i, p in enumerate(track_points) if p.get('time')]
 
@@ -483,9 +482,9 @@ class GPXProcessingService:
 
                 # Combine results (removing duplicate middle point)
                 return left_results[:-1] + right_results
-            else:
-                # Return only endpoints
-                return [points[0], points[-1]]
+            
+            # Return only endpoints
+            return [points[0], points[-1]]
 
         simplified_points = douglas_peucker_recursive(track_points, epsilon)
 

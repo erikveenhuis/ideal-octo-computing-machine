@@ -26,7 +26,7 @@ if __name__ == '__main__':
             # Git pull latest changes
             if os.path.exists('.git'):
                 print("Pulling latest code...")
-                result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+                result = subprocess.run(['git', 'pull'], capture_output=True, text=True, check=False)
                 if result.returncode == 0:
                     print("Git pull successful")
                     if result.stdout.strip() and result.stdout.strip() != "Already up to date.":
@@ -39,16 +39,16 @@ if __name__ == '__main__':
             # Install/update dependencies BEFORE imports that might fail
             if os.path.exists('requirements.txt'):
                 print("Installing/updating dependencies...")
-                venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+                VENV_PIP = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
 
                 # Check if virtual environment pip exists, fallback to system pip
-                if not os.path.exists(venv_pip):
-                    print(f"Virtual environment pip not found at {venv_pip}, using system pip")
-                    venv_pip = 'pip'
+                if not os.path.exists(VENV_PIP):
+                    print(f"Virtual environment pip not found at {VENV_PIP}, using system pip")
+                    VENV_PIP = 'pip'
 
                 result = subprocess.run(
-                    [venv_pip, 'install', '-r', 'requirements.txt'],
-                    capture_output=True, text=True
+                    [VENV_PIP, 'install', '-r', 'requirements.txt'],
+                    capture_output=True, text=True, check=False
                 )
 
                 if result.returncode == 0:
@@ -85,36 +85,36 @@ from services.deployment_service import DeploymentService
 
 def create_app(config_name=None):
     """Application factory pattern."""
-    app = Flask(__name__)
+    flask_app = Flask(__name__)
 
     # Load configuration
     config_name = config_name or os.environ.get('FLASK_CONFIG', 'default')
-    app.config.from_object(config[config_name])
+    flask_app.config.from_object(config[config_name])
 
     # Initialize extensions
-    csrf = CSRFProtect(app)
+    csrf_protect = CSRFProtect(flask_app)
 
-    limiter = Limiter(
+    rate_limiter = Limiter(
         key_func=get_remote_address,
-        default_limits=[app.config['DEFAULT_RATE_LIMIT']],
-        storage_uri=app.config['RATELIMIT_STORAGE_URL']
+        default_limits=[flask_app.config['DEFAULT_RATE_LIMIT']],
+        storage_uri=flask_app.config['RATELIMIT_STORAGE_URL']
     )
-    limiter.init_app(app)
+    rate_limiter.init_app(flask_app)
 
     # Setup logging
-    setup_logging(app)
+    setup_logging(flask_app)
 
     # Register error handlers
-    register_error_handlers(app)
+    register_error_handlers(flask_app)
 
     # Add security headers
-    @app.after_request
+    @flask_app.after_request
     def add_security_headers(response):
-        for header, value in app.config['SECURITY_HEADERS'].items():
+        for header, value in flask_app.config['SECURITY_HEADERS'].items():
             response.headers[header] = value
         return response
 
-    return app, limiter, csrf
+    return flask_app, rate_limiter, csrf_protect
 
 # Create app instance
 app, limiter, csrf = create_app()
@@ -234,11 +234,11 @@ def _validate_year_input(year: str) -> int:
 def _fetch_service_results(service_call, source_name: str, api_errors: list) -> list:
     """Fetch results from a service with error handling."""
     try:
-        results = service_call()
+        service_results = service_call()
         # Add source to each result
-        for result in results:
-            result['source'] = source_name
-        return results
+        for service_result in service_results:
+            service_result['source'] = source_name
+        return service_results
     except APIError as e:
         app.logger.warning(f"{source_name} API failed: {e.message}")
         api_errors.append(f"{source_name}: {e.message}")
@@ -275,7 +275,7 @@ def upload_gpx():
         file.seek(0)
 
         # Use the GPX processing service to handle the upload
-        result = gpx_processing_service.process_gpx_upload(
+        gpx_result = gpx_processing_service.process_gpx_upload(
             filename=file.filename,
             content_type=file.content_type,
             file_content=file_content,
@@ -283,7 +283,7 @@ def upload_gpx():
             include_metadata=False  # Can be made configurable if needed
         )
 
-        return jsonify(result)
+        return jsonify(gpx_result)
 
     except Exception as e:
         app.logger.error(f"Error in GPX upload: {str(e)}")
@@ -392,13 +392,13 @@ def transform_image():
         file_content = file.read()
 
         # Use the image transformation service to process the upload
-        result = image_transform_service.process_image_upload(
+        transform_result = image_transform_service.process_image_upload(
             filename=file.filename,
             content_type=file.content_type,
             file_content=file_content
         )
 
-        return jsonify(result)
+        return jsonify(transform_result)
 
     except Exception as e:
         app.logger.error(f"Error in image transformation: {str(e)}")

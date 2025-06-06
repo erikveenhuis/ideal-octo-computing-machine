@@ -14,7 +14,7 @@ import time
 from typing import Dict, Any, Optional
 from flask import current_app
 
-from exceptions import GitOperationError, DependencyInstallError, ServiceRestartError
+from exceptions import GitOperationError, ServiceRestartError
 
 
 class DeploymentService:
@@ -133,9 +133,9 @@ class DeploymentService:
                 self._log_info(f"Git reset output: {result.stdout.strip()}")
 
         except subprocess.TimeoutExpired as e:
-            raise GitOperationError(f"Git operation timed out: {str(e)}", git_command="fetch/reset")
+            raise GitOperationError(f"Git operation timed out: {str(e)}", git_command="fetch/reset") from e
         except subprocess.CalledProcessError as e:
-            raise GitOperationError(f"Git operation failed: {e.stderr}", git_command="fetch/reset")
+            raise GitOperationError(f"Git operation failed: {e.stderr}", git_command="fetch/reset") from e
 
     def _install_dependencies(self) -> None:
         """Install or update Python dependencies."""
@@ -154,7 +154,8 @@ class DeploymentService:
                 [pip_executable, 'install', '-r', 'requirements.txt'],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout for pip install
+                timeout=300,  # 5 minute timeout for pip install
+                check=False  # Don't raise exception on non-zero exit
             )
 
             if result.returncode == 0:
@@ -204,10 +205,10 @@ class DeploymentService:
 
         except subprocess.CalledProcessError as e:
             raise ServiceRestartError(f"Failed to reload WSGI application: {str(e)}",
-                                     service_name="WSGI", restart_method="touch")
-        except subprocess.TimeoutExpired:
+                                     service_name="WSGI", restart_method="touch") from e
+        except subprocess.TimeoutExpired as e:
             raise ServiceRestartError("WSGI reload operation timed out",
-                                     service_name="WSGI", restart_method="touch")
+                                     service_name="WSGI", restart_method="touch") from e
 
     def _log_info(self, message: str) -> None:
         """Log info message."""

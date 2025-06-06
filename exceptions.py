@@ -85,7 +85,6 @@ class ValidationError(AppError):
 
 class InputValidationError(ValidationError):
     """Raised when user input validation fails."""
-    pass
 
 
 class DataValidationError(ValidationError):
@@ -114,7 +113,6 @@ class FileError(AppError):
 
 class FileUploadError(FileError):
     """Raised when file uploads fail."""
-    pass
 
 
 class FileValidationError(FileError):
@@ -320,13 +318,12 @@ def get_error_category(exception: Exception) -> str:
     """
     if isinstance(exception, (ValidationError, InputValidationError, DataValidationError)):
         return 'validation'
-    elif isinstance(exception, (FileError, FileUploadError, FileProcessingError)):
+    if isinstance(exception, (FileError, FileUploadError, FileProcessingError)):
         return 'file_handling'
-    elif isinstance(exception, (APIError, ExternalAPIError)):
+    if isinstance(exception, (APIError, ExternalAPIError)):
         return 'external_api'
-    elif isinstance(exception, DeploymentError):
+    if isinstance(exception, DeploymentError):
         return 'deployment'
-    elif isinstance(exception, ConfigurationError):
+    if isinstance(exception, ConfigurationError):
         return 'configuration'
-    else:
-        return 'system'
+    return 'system'

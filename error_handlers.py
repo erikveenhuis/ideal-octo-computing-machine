@@ -1,6 +1,6 @@
 """Error handling module for the Flask application."""
 import traceback
-from typing import Optional, Tuple, Any
+from typing import Tuple, Any
 
 from flask import jsonify, render_template, request, current_app, Flask
 from werkzeug.exceptions import HTTPException
@@ -8,8 +8,7 @@ from werkzeug.exceptions import HTTPException
 # Import our comprehensive exception hierarchy
 from exceptions import (
     AppError, APIError, ValidationError, FileUploadError, FileError,
-    ExternalAPIError, DeploymentError, ConfigurationError,
-    ImageProcessingError, GPXProcessingError, SearchError,
+    DeploymentError, ConfigurationError,
     is_user_error, get_error_category
 )
 
@@ -187,16 +186,15 @@ class ErrorHandler:
         """Get a user-friendly title for the error page."""
         if isinstance(e, ValidationError):
             return "Input Error"
-        elif isinstance(e, FileError):
+        if isinstance(e, FileError):
             return "File Error"
-        elif isinstance(e, APIError):
+        if isinstance(e, APIError):
             return "Service Error"
-        elif isinstance(e, ConfigurationError):
+        if isinstance(e, ConfigurationError):
             return "Configuration Error"
-        elif isinstance(e, DeploymentError):
+        if isinstance(e, DeploymentError):
             return "System Error"
-        else:
-            return "Application Error"
+        return "Application Error"
 
 def register_error_handlers(app: Flask) -> None:
     """Register error handlers with the Flask app."""
