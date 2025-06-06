@@ -137,7 +137,7 @@ def validate_year_range(year: Optional[int],
     """Validate if year is within acceptable range."""
     if year is None:
         return True
-    return min_year < year and year < max_year
+    return min_year < year <= max_year
 
 def format_file_size(size_bytes: int) -> str:
     """Format file size in human readable format."""
@@ -215,8 +215,8 @@ def validate_image_dimensions(image_size: tuple, max_dimension: int = None) -> b
 
     width, height = image_size
     return (
-        width <= max_dimension and height <= max_dimension and
-        width > 0 and height > 0
+        0 < width <= max_dimension and 
+        0 < height <= max_dimension
     )
 
 def calculate_image_memory_usage(image_size: tuple, channels: int = 4) -> int:

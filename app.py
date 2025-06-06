@@ -326,7 +326,10 @@ def github_webhook():
                     # Quick git operations
                     print("Fetching and resetting...")
                     subprocess.run(['git', 'fetch', '--all'], check=True, capture_output=True)
-                    subprocess.run(['git', 'reset', '--hard', 'origin/main'], check=True, capture_output=True)
+                    subprocess.run(
+                        ['git', 'reset', '--hard', 'origin/main'], 
+                        check=True, capture_output=True
+                    )
 
                     # Install/update dependencies in virtual environment
                     print("Installing dependencies...")

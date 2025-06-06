@@ -228,7 +228,10 @@ class GPXProcessingService:
 
         # Calculate elevation range if available
         if has_elevation:
-            elevations = [point['elevation'] for point in track_points if point.get('elevation') is not None]
+            elevations = [
+                point['elevation'] for point in track_points 
+                if point.get('elevation') is not None
+            ]
             if elevations:
                 stats['elevation_range'] = {
                     'min': min(elevations),

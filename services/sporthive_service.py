@@ -59,7 +59,9 @@ class SporthiveService:
             # Log successful completion
             duration = time.time() - start_time
             log_api_request(self.source, url, duration)
-            current_app.logger.info(f"Successfully retrieved {len(results)} results from {self.source}")
+            current_app.logger.info(
+                f"Successfully retrieved {len(results)} results from {self.source}"
+            )
 
             return results
 

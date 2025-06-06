@@ -120,8 +120,8 @@ class ImageTransformService:
             if not validate_image_dimensions(img.size):
                 max_dim = APIConstants.MAX_IMAGE_DIMENSION
                 raise FileUploadError(
-                    f'Image dimensions too large. Maximum allowed is '
-                    f'{max_dim}x{max_dim} pixels. Your image is {img.size[0]}x{img.size[1]} pixels.',
+                    f'Image dimensions too large. Maximum allowed is {max_dim}x{max_dim} pixels. '
+                    f'Your image is {img.size[0]}x{img.size[1]} pixels.',
                     filename
                 )
 
@@ -197,7 +197,7 @@ class ImageTransformService:
             "canny_high_threshold": 200,
             "control_guidance_end": 1,
             "control_guidance_start": 0,
-            "controlnet_conditioning_scale": 2  # Reduced to allow more background change
+            "controlnet_conditioning_scale": 2  # Reduced for more background change
         }
 
         self.logger.info("Calling Replicate API...")
