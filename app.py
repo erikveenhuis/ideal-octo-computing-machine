@@ -482,6 +482,12 @@ def github_webhook():
                     subprocess.run(['git', 'fetch', '--all'], check=True, capture_output=True)
                     subprocess.run(['git', 'reset', '--hard', 'origin/main'], check=True, capture_output=True)
                     
+                    # Install/update dependencies in virtual environment
+                    print("Installing dependencies...")
+                    venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+                    subprocess.run([venv_pip, 'install', '-r', 'requirements.txt'], check=True, capture_output=True)
+                    print("Dependencies installed successfully")
+                    
                     # Touch the WSGI file to trigger reload
                     wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
                     if os.path.exists(wsgi_file):
