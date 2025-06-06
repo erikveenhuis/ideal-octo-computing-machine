@@ -1,0 +1,90 @@
+<style>
+    .map-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #f3f4f6;
+        position: relative; /* Create positioning context */
+    }
+    .dark .map-container {
+        background-color: #374151;
+    }
+    .map-wrapper {
+        /* Always maintain 8.5:11 aspect ratio */
+        aspect-ratio: 8.5 / 11;
+        /* Perfect size for clean 3x scaling to print (850x3=2550, 1100x3=3300) */
+        width: 850px;
+        height: auto; /* Height will be 1100px due to 8.5:11 aspect ratio */
+        border: 2px solid #111;
+        border-radius: 4px;
+        overflow: hidden;
+        /* Absolute positioning within the map-container */
+        position: absolute;
+        /* Center within the container space (to the right of sidebar) */
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        transition: transform .2s ease-out;
+    }
+    #map {
+        width: 100%;
+        height: 100%;
+        border: none;
+    }
+    .marker-info {
+        font-size: 12px;
+        padding: 4px 8px;
+        background-color: white;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .sidebar {
+        transition: all 0.3s ease-out;
+        height: 100%;
+    }
+    .sidebar-content {
+        transition: all 0.3s ease-out;
+        height: calc(100% - 3rem);
+    }
+    .sidebar.collapsed .sidebar-content {
+        height: 0;
+        opacity: 0;
+        margin: 0;
+        padding: 0;
+    }
+    .toggle-sidebar {
+        display: none;
+    }
+
+    /* Clean up - no mobile support needed since we show message instead */
+    @media print {
+        .sidebar, .sidebar-content, .controls, .nav-links, #message, .mapboxgl-control-container {
+            display: none !important;
+        }
+        .map-container {
+            background: white !important;
+            padding: 0 !important;
+        }
+        .map-wrapper {
+            max-width: none !important;
+            width: 100vw !important; 
+            height: 90vh !important;
+            aspect-ratio: none !important;
+            border: 2px solid #111 !important;
+            margin: 0 auto !important;
+            page-break-after: avoid;
+        }
+    }
+
+    /* Hide all Mapbox attribution elements completely */
+    .mapboxgl-ctrl-attrib,
+    .mapboxgl-ctrl-attrib-inner,
+    .mapboxgl-ctrl-attrib-button,
+    .mapboxgl-ctrl-logo,
+    .mapbox-improve-map {
+        display: none !important;
+        visibility: hidden !important;
+    }
+</style> 

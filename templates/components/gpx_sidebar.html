@@ -1,0 +1,20 @@
+<!-- Fixed sidebar on the left -->
+<div class="fixed left-0 top-16 w-80 h-[calc(100vh-4rem)] bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 z-10">
+    <div class="sidebar h-full">
+        <button class="toggle-sidebar text-gray-700 dark:text-gray-300 lg:hidden">
+            <span class="font-medium">Controls</span>
+            <svg class="w-5 h-5 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+        </button>
+        <div class="sidebar-content p-4 h-[calc(100%-3rem)] lg:h-full">
+            <div class="flex flex-col h-full">
+                <!-- Upload Section -->
+                {% include 'components/gpx_upload_form.html' %}
+                
+                <!-- Controls Section -->
+                {% include 'components/gpx_controls.html' %}
+            </div>
+        </div>
+    </div>
+</div> 
