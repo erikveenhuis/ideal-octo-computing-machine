@@ -332,11 +332,15 @@ class GPXExportManager {
         boardCanvas.width = exportSettings.finalWidth;
         boardCanvas.height = exportSettings.finalHeight;
         
+        // Get current sharpness setting for the selected quality
+        const selectedQuality = document.getElementById('exportQuality').value;
+        const currentSharpness = getSharpnessForQuality(selectedQuality);
+        
         // Scale to final print size
         await pica().resize(canvas, boardCanvas, {
             quality: 3,
             alpha: true,
-            unsharpAmount: quality.unsharpAmount,
+            unsharpAmount: currentSharpness,
             unsharpRadius: 0.8,
             unsharpThreshold: 1,
             transferable: true

@@ -13,6 +13,21 @@ class GPXApp {
 
         // Set up event listeners
         this.setupEventListeners();
+
+        // Initialize sharpness control
+        this.initializeSharpnessControl();
+    }
+
+    initializeSharpnessControl() {
+        // Set initial sharpness value based on the default selected quality
+        const initialQuality = document.getElementById('exportQuality').value;
+        const initialSharpness = getSharpnessForQuality(initialQuality);
+        
+        const sharpnessSlider = document.getElementById('sharpnessSlider');
+        const sharpnessValue = document.getElementById('sharpnessValue');
+        
+        sharpnessSlider.value = initialSharpness;
+        sharpnessValue.textContent = initialSharpness;
     }
 
     setupEventListeners() {
@@ -33,6 +48,21 @@ class GPXApp {
         // Map style change
         document.getElementById('mapStyle').addEventListener('change', (e) => {
             this.mapManager.changeMapStyle(e.target.value);
+        });
+
+        // Export quality change - update sharpness slider to reflect default for selected quality
+        document.getElementById('exportQuality').addEventListener('change', (e) => {
+            this.handleQualityChange(e.target.value);
+        });
+
+        // Sharpness slider
+        document.getElementById('sharpnessSlider').addEventListener('input', (e) => {
+            this.handleSharpnessChange(e.target.value);
+        });
+
+        // Reset sharpness button
+        document.getElementById('resetSharpness').addEventListener('click', () => {
+            this.handleSharpnessReset();
         });
 
         // Toggle markers
@@ -135,6 +165,42 @@ class GPXApp {
         }
         
         this.mapManager.toggleAntialiasing(!isEnabled);
+    }
+
+    handleQualityChange(selectedQuality) {
+        // Update sharpness slider to show the current value for the selected quality
+        const currentSharpness = getSharpnessForQuality(selectedQuality);
+        const sharpnessSlider = document.getElementById('sharpnessSlider');
+        const sharpnessValue = document.getElementById('sharpnessValue');
+        
+        sharpnessSlider.value = currentSharpness;
+        sharpnessValue.textContent = currentSharpness;
+    }
+
+    handleSharpnessChange(value) {
+        const selectedQuality = document.getElementById('exportQuality').value;
+        const numericValue = parseInt(value);
+        
+        // Update the current sharpness setting for the selected quality
+        setSharpnessForQuality(selectedQuality, numericValue);
+        
+        // Update the display value
+        document.getElementById('sharpnessValue').textContent = numericValue;
+    }
+
+    handleSharpnessReset() {
+        const selectedQuality = document.getElementById('exportQuality').value;
+        const defaultSharpness = defaultSharpnessSettings[selectedQuality];
+        
+        // Reset to default for current quality
+        setSharpnessForQuality(selectedQuality, defaultSharpness);
+        
+        // Update UI elements
+        const sharpnessSlider = document.getElementById('sharpnessSlider');
+        const sharpnessValue = document.getElementById('sharpnessValue');
+        
+        sharpnessSlider.value = defaultSharpness;
+        sharpnessValue.textContent = defaultSharpness;
     }
 
     async handleSaveImage() {

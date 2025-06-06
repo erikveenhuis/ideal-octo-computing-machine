@@ -46,6 +46,19 @@
     </div>
 
     <div class="flex items-center justify-between">
+        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Sharpness:</label>
+        <div class="flex items-center space-x-2">
+            <input type="range" id="sharpnessSlider" min="0" max="200" value="120" 
+                class="w-24 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider dark:bg-gray-700">
+            <span id="sharpnessValue" class="text-sm font-medium text-gray-700 dark:text-gray-300 w-8">120</span>
+            <button id="resetSharpness" type="button" title="Reset to default" 
+                class="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
+                Reset
+            </button>
+        </div>
+    </div>
+
+    <div class="flex items-center justify-between">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Anti-aliasing:</label>
         <button id="toggleAntialiasing" type="button" 
             class="relative inline-flex h-6 w-11 items-center rounded-full bg-blue-600 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900">
