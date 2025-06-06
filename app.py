@@ -14,6 +14,50 @@ import subprocess
 import time
 from datetime import datetime
 
+# Auto-update dependencies on startup to prevent import errors
+if __name__ == '__main__':
+    try:
+        print("Starting up - checking for updates...")
+        
+        # Git pull latest changes
+        if os.path.exists('.git'):
+            print("Pulling latest code...")
+            result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+            if result.returncode == 0:
+                print("Git pull successful")
+                if result.stdout.strip() and result.stdout.strip() != "Already up to date.":
+                    print(f"Git output: {result.stdout}")
+            else:
+                print(f"Git pull failed: {result.stderr}")
+        else:
+            print("Not in a git repository, skipping git pull")
+        
+        # Install/update dependencies BEFORE imports that might fail
+        if os.path.exists('requirements.txt'):
+            print("Installing/updating dependencies...")
+            venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+            
+            # Check if virtual environment pip exists, fallback to system pip
+            if not os.path.exists(venv_pip):
+                print(f"Virtual environment pip not found at {venv_pip}, using system pip")
+                venv_pip = 'pip'
+            
+            result = subprocess.run(
+                [venv_pip, 'install', '-r', 'requirements.txt'],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode == 0:
+                print("Dependencies installed successfully")
+            else:
+                print(f"Pip install failed: {result.stderr}")
+        else:
+            print("No requirements.txt found, skipping dependency installation")
+            
+    except Exception as e:
+        print(f"Startup update failed: {str(e)}")
+        print("Continuing with app startup...")
+
 from flask import Flask, render_template, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -512,50 +556,6 @@ def version_info():
         'author': git_info.get('author'),
         'timestamp': datetime.utcnow().isoformat()
     })
-
-if __name__ == '__main__':
-    # Update code and dependencies on startup
-    try:
-        print("Starting up - checking for updates...")
-        
-        # Git pull latest changes
-        if os.path.exists('.git'):
-            print("Pulling latest code...")
-            result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Git pull successful")
-                if result.stdout.strip():
-                    print(f"Git output: {result.stdout}")
-            else:
-                print(f"Git pull failed: {result.stderr}")
-        else:
-            print("Not in a git repository, skipping git pull")
-        
-        # Install/update dependencies
-        if os.path.exists('requirements.txt'):
-            print("Installing/updating dependencies...")
-            venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-            
-            # Check if virtual environment pip exists, fallback to system pip
-            if not os.path.exists(venv_pip):
-                print(f"Virtual environment pip not found at {venv_pip}, using system pip")
-                venv_pip = 'pip'
-            
-            result = subprocess.run(
-                [venv_pip, 'install', '-r', 'requirements.txt'],
-                capture_output=True, text=True
-            )
-            
-            if result.returncode == 0:
-                print("Dependencies installed successfully")
-            else:
-                print(f"Pip install failed: {result.stderr}")
-        else:
-            print("No requirements.txt found, skipping dependency installation")
-            
-    except Exception as e:
-        print(f"Startup update failed: {str(e)}")
-        print("Continuing with app startup...")
 
     # Ensure required directories exist
     for directory in ['templates', 'logs']:
