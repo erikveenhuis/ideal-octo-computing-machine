@@ -163,7 +163,11 @@ def search():
         raise  # Re-raise validation errors
     except Exception as e:
         app.logger.error(f"Unexpected error in search: {str(e)}")
-        raise APIError("An unexpected error occurred while searching", "Search Service", APIConstants.HTTP_INTERNAL_ERROR) from e
+        raise APIError(
+            "An unexpected error occurred while searching",
+            "Search Service",
+            APIConstants.HTTP_INTERNAL_ERROR
+        ) from e
 
 def _validate_year_input(year: str) -> int:
     """Validate year input parameter."""
@@ -281,13 +285,18 @@ def github_webhook():
 
         # Validate webhook payload structure
         if not validate_github_webhook_payload(payload, event_type):
-            app.logger.warning(f"Invalid webhook payload structure for event type: {event_type}")
+            app.logger.warning(
+                f"Invalid webhook payload structure for event type: {event_type}"
+            )
             return jsonify({'error': 'Invalid payload structure'}), 400
 
         # Log webhook details for monitoring
         repository_name = payload.get('repository', {}).get('full_name', 'unknown')
         sender_login = payload.get('sender', {}).get('login', 'unknown')
-        app.logger.info(f"Valid webhook received - Event: {event_type}, Repo: {repository_name}, Sender: {sender_login}")
+        app.logger.info(
+            f"Valid webhook received - Event: {event_type}, "
+            f"Repo: {repository_name}, Sender: {sender_login}"
+        )
 
         if event_type == 'push':
             # Start with a quick response to prevent timeout
@@ -322,7 +331,10 @@ def github_webhook():
                     # Install/update dependencies in virtual environment
                     print("Installing dependencies...")
                     venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-                    subprocess.run([venv_pip, 'install', '-r', 'requirements.txt'], check=True, capture_output=True)
+                    subprocess.run(
+                        [venv_pip, 'install', '-r', 'requirements.txt'],
+                        check=True, capture_output=True
+                    )
                     print("Dependencies installed successfully")
 
                     # Touch the WSGI file to trigger reload

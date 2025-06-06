@@ -48,6 +48,7 @@ def log_api_error(source: str, error: Union[str, Exception], url: Optional[str] 
         current_app.logger.error(f"API Error from {source}: {str(error)}")
 
 def log_request_metrics(f: Callable) -> Callable:
+    """Decorator to log request metrics including duration and status."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         start_time = time.time()
@@ -136,7 +137,7 @@ def validate_year_range(year: Optional[int],
     """Validate if year is within acceptable range."""
     if year is None:
         return True
-    return min_year < year < max_year
+    return min_year < year and year < max_year
 
 def format_file_size(size_bytes: int) -> str:
     """Format file size in human readable format."""
@@ -189,7 +190,10 @@ def get_expected_content_types_for_extension(extension: str) -> set:
         'avif': {'image/avif'},
 
         # GPX types
-        'gpx': {'application/gpx+xml', 'text/xml', 'application/xml', 'text/plain', 'application/octet-stream'}
+        'gpx': {
+            'application/gpx+xml', 'text/xml', 'application/xml',
+            'text/plain', 'application/octet-stream'
+        }
     }
 
     return content_type_map.get(extension, set())
@@ -210,8 +214,10 @@ def validate_image_dimensions(image_size: tuple, max_dimension: int = None) -> b
         max_dimension = APIConstants.MAX_IMAGE_DIMENSION
 
     width, height = image_size
-    return (width <= max_dimension and height <= max_dimension and
-            width > 0 and height > 0)
+    return (
+        width <= max_dimension and height <= max_dimension and
+        width > 0 and height > 0
+    )
 
 def calculate_image_memory_usage(image_size: tuple, channels: int = 4) -> int:
     """
@@ -251,7 +257,8 @@ def validate_github_webhook_payload(payload: Dict[str, Any], event_type: str) ->
 
     # Validate repository structure
     repository = payload.get('repository', {})
-    if not isinstance(repository, dict) or 'name' not in repository or 'full_name' not in repository:
+    if (not isinstance(repository, dict) or 'name' not in repository
+        or 'full_name' not in repository):
         current_app.logger.warning("Invalid repository structure in webhook payload")
         return False
 
@@ -264,7 +271,7 @@ def validate_github_webhook_payload(payload: Dict[str, Any], event_type: str) ->
     # Event-specific validation
     if event_type == 'push':
         return _validate_push_payload(payload)
-    elif event_type == 'pull_request':
+    if event_type == 'pull_request':
         return _validate_pull_request_payload(payload)
 
     # For unknown event types, basic validation is sufficient
@@ -299,7 +306,9 @@ def _validate_pull_request_payload(payload: Dict[str, Any]) -> bool:
 
     for field in required_pr_fields:
         if field not in payload:
-            current_app.logger.warning(f"Missing required pull_request field '{field}' in webhook payload")
+            current_app.logger.warning(
+                f"Missing required pull_request field '{field}' in webhook payload"
+            )
             return False
 
     # Validate pull_request structure

@@ -112,20 +112,24 @@ class ImageTransformService:
             # Try to open and convert the image
             self.logger.debug("Attempting to open image...")
             img = Image.open(input_stream)
-            self.logger.info(f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}")
+            self.logger.info(
+                f"Successfully opened image. Format: {img.format}, Mode: {img.mode}, Size: {img.size}"
+            )
 
             # Validate image dimensions for security
             if not validate_image_dimensions(img.size):
                 max_dim = APIConstants.MAX_IMAGE_DIMENSION
                 raise FileUploadError(
-                    f'Image dimensions too large. Maximum allowed is {max_dim}x{max_dim} pixels. '
-                    f'Your image is {img.size[0]}x{img.size[1]} pixels.',
+                    f'Image dimensions too large. Maximum allowed is '
+                    f'{max_dim}x{max_dim} pixels. Your image is {img.size[0]}x{img.size[1]} pixels.',
                     filename
                 )
 
             # Log memory usage estimate for monitoring
             memory_usage = calculate_image_memory_usage(img.size, 4 if img.mode == 'RGBA' else 3)
-            self.logger.info(f"Estimated image memory usage: {memory_usage / (1024*1024):.2f} MB")
+            self.logger.info(
+                f"Estimated image memory usage: {memory_usage / (1024*1024):.2f} MB"
+            )
 
             # Apply EXIF orientation if present
             try:
@@ -199,7 +203,9 @@ class ImageTransformService:
         self.logger.info("Calling Replicate API...")
         try:
             output = replicate.run(self.replicate_model, input=input_params)
-            self.logger.info(f"Replicate API response received: {len(output) if output else 0} results")
+            self.logger.info(
+                f"Replicate API response received: {len(output) if output else 0} results"
+            )
 
             # The output is a list of URLs
             if output and len(output) > 0:
@@ -207,8 +213,9 @@ class ImageTransformService:
                 image_url = str(output[0])
                 self.logger.info(f"Successfully generated image: {image_url}")
                 return image_url
-            else:
-                raise APIError('No output generated from image transformation', 'Replicate', 500)
+            raise APIError(
+                'No output generated from image transformation', 'Replicate', 500
+            )
 
         except Exception as e:
             self.logger.error(f"Error calling Replicate API: {str(e)}")

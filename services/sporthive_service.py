@@ -65,10 +65,16 @@ class SporthiveService:
 
         except requests.exceptions.Timeout as exc:
             log_api_error(self.source, "Request timeout", url)
-            raise APIError(f"Timeout while fetching data from {self.source}", self.source, APIConstants.HTTP_TIMEOUT) from exc
+            raise APIError(
+                f"Timeout while fetching data from {self.source}",
+                self.source, APIConstants.HTTP_TIMEOUT
+            ) from exc
         except requests.exceptions.RequestException as e:
             log_api_error(self.source, str(e), url)
-            raise APIError(f"Network error while fetching data from {self.source}", self.source, APIConstants.HTTP_INTERNAL_ERROR) from e
+            raise APIError(
+                f"Network error while fetching data from {self.source}",
+                self.source, APIConstants.HTTP_INTERNAL_ERROR
+            ) from e
 
     def _validate_name(self, name: str) -> str:
         """Validate and sanitize the search name."""
@@ -85,9 +91,8 @@ class SporthiveService:
         year_int = safe_int(year)
         if year_int and 1900 < year_int < 2100:
             return year_int
-        else:
-            current_app.logger.warning(f"Ignoring invalid year: {year}")
-            return None
+        current_app.logger.warning(f"Ignoring invalid year: {year}")
+        return None
 
     def _build_search_url(self, name: str, year: Optional[int] = None) -> str:
         """Build the search URL for the given name and year."""

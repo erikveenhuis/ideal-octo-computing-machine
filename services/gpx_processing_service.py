@@ -97,7 +97,9 @@ class GPXProcessingService:
                             'time': point.time.isoformat() if point.time else None
                         })
 
-            self.logger.info(f"Successfully processed GPX file with {len(track_points)} points")
+            self.logger.info(
+                f"Successfully processed GPX file with {len(track_points)} points"
+            )
             return track_points
 
         except Exception as e:
@@ -148,8 +150,10 @@ class GPXProcessingService:
             self.logger.error(f"Error extracting metadata from GPX file {filename}: {str(e)}")
             raise FileUploadError(f"Error processing GPX file metadata: {str(e)}", filename) from e
 
-    def process_gpx_upload(self, filename: str, content_type: str, file_content: bytes,
-                          file_stream: Union[IO, Any], include_metadata: bool = False) -> Dict[str, Any]:
+    def process_gpx_upload(
+        self, filename: str, content_type: str, file_content: bytes,
+        file_stream: Union[IO, Any], include_metadata: bool = False
+    ) -> Dict[str, Any]:
         """
         Complete GPX processing pipeline from upload to track extraction.
 
@@ -209,7 +213,9 @@ class GPXProcessingService:
                 'distance_estimate': None
             }
 
-        has_elevation = any(point.get('elevation') is not None for point in track_points)
+        has_elevation = any(
+            point.get('elevation') is not None for point in track_points
+        )
         has_time = any(point.get('time') is not None for point in track_points)
 
         stats = {

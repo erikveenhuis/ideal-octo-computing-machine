@@ -87,7 +87,7 @@ def register_error_handlers(app: Flask) -> None:
     """Register error handlers with the Flask app."""
 
     @app.errorhandler(404)
-    def not_found_error(error):
+    def not_found_error(_error):
         current_app.logger.warning(f"404 Error: {request.url}")
         if request.path.startswith('/api/') or request.is_json:
             return jsonify({
@@ -114,7 +114,7 @@ def register_error_handlers(app: Flask) -> None:
                              title="Server Error"), 500
 
     @app.errorhandler(429)
-    def ratelimit_handler(e):
+    def ratelimit_handler(_e):
         current_app.logger.warning(f"Rate limit exceeded: {request.remote_addr}")
         if request.path.startswith('/api/') or request.is_json:
             return jsonify({
@@ -126,7 +126,7 @@ def register_error_handlers(app: Flask) -> None:
                              title="Rate Limited"), 429
 
     @app.errorhandler(413)
-    def file_too_large(error):
+    def file_too_large(_error):
         current_app.logger.warning(f"File too large: {request.remote_addr}")
         if request.path.startswith('/api/') or request.is_json:
             return jsonify({

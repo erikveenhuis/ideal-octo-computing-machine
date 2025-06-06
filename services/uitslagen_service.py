@@ -53,16 +53,24 @@ class UitslagenService:
             # Log successful completion
             duration = time.time() - start_time
             log_api_request(self.source, url, duration)
-            current_app.logger.info(f"Successfully retrieved {len(results)} results from {self.source}")
+            current_app.logger.info(
+                f"Successfully retrieved {len(results)} results from {self.source}"
+            )
 
             return results
 
         except requests.exceptions.Timeout as exc:
             log_api_error(self.source, "Request timeout", url)
-            raise APIError(f"Timeout while fetching data from {self.source}", self.source, APIConstants.HTTP_TIMEOUT) from exc
+            raise APIError(
+                f"Timeout while fetching data from {self.source}",
+                self.source, APIConstants.HTTP_TIMEOUT
+            ) from exc
         except requests.exceptions.RequestException as e:
             log_api_error(self.source, str(e), url)
-            raise APIError(f"Error fetching data from {self.source}", self.source, APIConstants.HTTP_INTERNAL_ERROR) from e
+            raise APIError(
+                f"Error fetching data from {self.source}",
+                self.source, APIConstants.HTTP_INTERNAL_ERROR
+            ) from e
 
     def _validate_name(self, name: str) -> str:
         """Validate and sanitize the search name."""
@@ -97,7 +105,9 @@ class UitslagenService:
 
         # Find result sections
         result_sections = self._find_result_sections(soup)
-        current_app.logger.info(f"Found {len(result_sections)} result sections from {self.source}")
+        current_app.logger.info(
+            f"Found {len(result_sections)} result sections from {self.source}"
+        )
 
         # Process each section
         results = []
@@ -117,10 +127,14 @@ class UitslagenService:
         error_message = soup.find('div', style=lambda x: x and 'background-color:#ffcccc' in x)
         if error_message:
             error_text = error_message.get_text(strip=True)
-            if 'tijdelijk even niet beschikbaar' in error_text or 'temporarily unavailable' in error_text.lower():
-                current_app.logger.warning(f"{self.source} search is temporarily disabled: {error_text}")
+            if ('tijdelijk even niet beschikbaar' in error_text or
+                'temporarily unavailable' in error_text.lower()):
+                current_app.logger.warning(
+                    f"{self.source} search is temporarily disabled: {error_text}"
+                )
                 raise APIError(
-                    f"Search on {self.source} is temporarily disabled. Try the Uitslagen.nl mobile app instead.",
+                    f"Search on {self.source} is temporarily disabled. "
+                    f"Try the Uitslagen.nl mobile app instead.",
                     self.source,
                     APIConstants.HTTP_SERVICE_UNAVAILABLE
                 )
@@ -132,11 +146,15 @@ class UitslagenService:
 
         if not result_sections:
             # Try alternative selectors
-            result_sections = soup.find_all('div', class_=['result-item', 'result-section', 'zoekresultaat'])
+            result_sections = soup.find_all(
+                'div', class_=['result-item', 'result-section', 'zoekresultaat']
+            )
 
             if not result_sections:
                 # Try table-based results
-                result_sections = soup.find_all('table', class_=['result-table', 'zoekresultaat-tabel'])
+                result_sections = soup.find_all(
+                    'table', class_=['result-table', 'zoekresultaat-tabel']
+                )
 
         return result_sections
 
