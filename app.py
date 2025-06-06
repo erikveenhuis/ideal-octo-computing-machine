@@ -11,48 +11,54 @@ import hashlib
 import hmac
 import os
 import subprocess
-import time
 from datetime import datetime
 
-# Auto-update dependencies on startup to prevent import errors
+# Environment-aware startup operations
 if __name__ == '__main__':
     try:
-        print("Starting up - checking for updates...")
+        # Only run auto-update in production environment
+        environment = os.environ.get('FLASK_ENV', 'development')
+        auto_update = os.environ.get('AUTO_UPDATE_ON_STARTUP', 'false').lower() == 'true'
         
-        # Git pull latest changes
-        if os.path.exists('.git'):
-            print("Pulling latest code...")
-            result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Git pull successful")
-                if result.stdout.strip() and result.stdout.strip() != "Already up to date.":
-                    print(f"Git output: {result.stdout}")
+        if environment == 'production' or auto_update:
+            print("Starting up - checking for updates...")
+            
+            # Git pull latest changes
+            if os.path.exists('.git'):
+                print("Pulling latest code...")
+                result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    print("Git pull successful")
+                    if result.stdout.strip() and result.stdout.strip() != "Already up to date.":
+                        print(f"Git output: {result.stdout}")
+                else:
+                    print(f"Git pull failed: {result.stderr}")
             else:
-                print(f"Git pull failed: {result.stderr}")
-        else:
-            print("Not in a git repository, skipping git pull")
-        
-        # Install/update dependencies BEFORE imports that might fail
-        if os.path.exists('requirements.txt'):
-            print("Installing/updating dependencies...")
-            venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+                print("Not in a git repository, skipping git pull")
             
-            # Check if virtual environment pip exists, fallback to system pip
-            if not os.path.exists(venv_pip):
-                print(f"Virtual environment pip not found at {venv_pip}, using system pip")
-                venv_pip = 'pip'
-            
-            result = subprocess.run(
-                [venv_pip, 'install', '-r', 'requirements.txt'],
-                capture_output=True, text=True
-            )
-            
-            if result.returncode == 0:
-                print("Dependencies installed successfully")
+            # Install/update dependencies BEFORE imports that might fail
+            if os.path.exists('requirements.txt'):
+                print("Installing/updating dependencies...")
+                venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+                
+                # Check if virtual environment pip exists, fallback to system pip
+                if not os.path.exists(venv_pip):
+                    print(f"Virtual environment pip not found at {venv_pip}, using system pip")
+                    venv_pip = 'pip'
+                
+                result = subprocess.run(
+                    [venv_pip, 'install', '-r', 'requirements.txt'],
+                    capture_output=True, text=True
+                )
+                
+                if result.returncode == 0:
+                    print("Dependencies installed successfully")
+                else:
+                    print(f"Pip install failed: {result.stderr}")
             else:
-                print(f"Pip install failed: {result.stderr}")
+                print("No requirements.txt found, skipping dependency installation")
         else:
-            print("No requirements.txt found, skipping dependency installation")
+            print(f"Starting in {environment} mode - skipping auto-update")
             
     except Exception as e:
         print(f"Startup update failed: {str(e)}")
@@ -74,6 +80,7 @@ from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
 from services.image_transform_service import ImageTransformService
 from services.gpx_processing_service import GPXProcessingService
+from services.deployment_service import DeploymentService
 
 def create_app(config_name=None):
     """Application factory pattern."""
@@ -134,6 +141,9 @@ image_transform_service = ImageTransformService(
 
 # Initialize GPX processing service
 gpx_processing_service = GPXProcessingService()
+
+# Initialize deployment service
+deployment_service = DeploymentService()
 
 # Configure API tokens from config
 if not app.config['REPLICATE_API_TOKEN']:
@@ -344,97 +354,9 @@ def github_webhook():
         )
 
         if event_type == 'push':
-            # Start with a quick response to prevent timeout
-            response = jsonify({
-                'message': 'Webhook received, starting deployment process',
-                'status': 'processing'
-            })
-
-            # Run the deployment process in a separate thread
-            def deploy_process():
-                try:
-                    # Get the current working directory
-                    current_dir = os.getcwd()
-                    print(f"Current working directory: {current_dir}")
-
-                    # Ensure we're in the correct directory
-                    if not os.path.exists(os.path.join(current_dir, '.git')):
-                        print("Not in a git repository, attempting to find it...")
-                        parent_dir = os.path.dirname(current_dir)
-                        while parent_dir != current_dir:
-                            if os.path.exists(os.path.join(parent_dir, '.git')):
-                                print(f"Found git repository in: {parent_dir}")
-                                os.chdir(parent_dir)
-                                break
-                            parent_dir = os.path.dirname(parent_dir)
-
-                    # Quick git operations
-                    print("Fetching and resetting...")
-                    subprocess.run(['git', 'fetch', '--all'], check=True, capture_output=True)
-                    subprocess.run(
-                        ['git', 'reset', '--hard', 'origin/main'], 
-                        check=True, capture_output=True
-                    )
-
-                    # Install/update dependencies in virtual environment
-                    print("Installing dependencies...")
-                    venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-                    
-                    # Check if requirements.txt exists
-                    if not os.path.exists('requirements.txt'):
-                        print("Warning: requirements.txt not found, skipping pip install")
-                    else:
-                        # Check if virtual environment pip exists
-                        if not os.path.exists(venv_pip):
-                            print(f"Warning: Virtual environment pip not found at {venv_pip}")
-                            print("Attempting to use system pip...")
-                            venv_pip = 'pip'
-                        
-                        # Run pip install with better error handling
-                        result = subprocess.run(
-                            [venv_pip, 'install', '-r', 'requirements.txt'],
-                            capture_output=True, text=True
-                        )
-                        
-                        if result.returncode == 0:
-                            print("Dependencies installed successfully")
-                            if result.stdout:
-                                print(f"Pip output: {result.stdout}")
-                        else:
-                            print(f"Pip install failed with return code: {result.returncode}")
-                            print(f"Pip stdout: {result.stdout}")
-                            print(f"Pip stderr: {result.stderr}")
-                            # Don't fail the entire deployment for pip issues
-                            print("Continuing deployment despite pip install failure...")
-
-                    # Touch the WSGI file to trigger reload
-                    wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
-                    if os.path.exists(wsgi_file):
-                        # First touch the WSGI file to trigger reload
-                        subprocess.run(['touch', wsgi_file], check=True)
-                        print("Successfully touched WSGI file")
-
-                        # Wait a moment for the old workers to start shutting down
-                        time.sleep(2)
-
-                        # Touch again to ensure new workers start
-                        subprocess.run(['touch', wsgi_file], check=True)
-                        print("Touched WSGI file again to ensure new workers start")
-                    else:
-                        print(f"WSGI file not found at: {wsgi_file}")
-
-                except Exception as e:
-                    print(f"Deployment error: {str(e)}")
-                    import traceback
-                    print(traceback.format_exc())
-
-            # Start the deployment process in a background thread
-            import threading
-            thread = threading.Thread(target=deploy_process)
-            thread.daemon = True
-            thread.start()
-
-            return response, 200
+            # Use the deployment service to handle the deployment
+            response_data = deployment_service.start_deployment(payload)
+            return jsonify(response_data), 200
 
         return jsonify({'message': 'Webhook received'}), 200
 
@@ -557,6 +479,8 @@ def version_info():
         'timestamp': datetime.utcnow().isoformat()
     })
 
+# Actually run the app when this script is executed directly
+if __name__ == '__main__':
     # Ensure required directories exist
     for directory in ['templates', 'logs']:
         if not os.path.exists(directory):
@@ -565,4 +489,4 @@ def version_info():
     # Run the application
     app.run(debug=app.config.get('DEBUG', False),
             host='0.0.0.0',
-            port=int(os.environ.get('PORT', 5000)))
+            port=int(os.environ.get('PORT', 8000)))

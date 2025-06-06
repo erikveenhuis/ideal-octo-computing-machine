@@ -9,10 +9,12 @@ from .uitslagen_service import UitslagenService
 from .sporthive_service import SporthiveService
 from .image_transform_service import ImageTransformService
 from .gpx_processing_service import GPXProcessingService
+from .deployment_service import DeploymentService
 
 __all__ = [
     'UitslagenService',
     'SporthiveService',
     'ImageTransformService',
-    'GPXProcessingService'
+    'GPXProcessingService',
+    'DeploymentService'
 ]
