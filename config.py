@@ -133,9 +133,10 @@ class APIConstants:
     # HTML parsing
     EXPECTED_RESULT_COLUMNS = 7
 
-    # Image processing
-    MAX_IMAGE_DIMENSION = 4096  # Increased to handle larger images like 2550x3300
-    DEFAULT_IMAGE_QUALITY = 85
+    # Image processing - Enhanced for ultra-high quality exports
+    MAX_IMAGE_DIMENSION = 8192  # Support up to 8K images for maximum quality exports
+    DEFAULT_IMAGE_QUALITY = 95  # Increased default quality from 85 to 95
+    MAX_EXPORT_DIMENSION = 6000  # Maximum dimension for map exports (600 DPI * 10 inches)
 
 # URL patterns and endpoints
 class URLPatterns:
