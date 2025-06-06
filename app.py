@@ -17,7 +17,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, exempt
 from PIL import Image  # Still needed for logging available decoders
 
 # Import our custom modules
@@ -259,6 +259,7 @@ def verify_github_webhook(payload, signature):
 @app.route('/webhook', methods=['POST'])
 @limiter.limit(app.config['WEBHOOK_RATE_LIMIT'])
 @log_request_metrics
+@csrf.exempt
 def github_webhook():
     """Handle GitHub webhook events."""
     try:
