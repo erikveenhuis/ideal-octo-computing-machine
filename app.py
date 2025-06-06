@@ -335,11 +335,33 @@ def github_webhook():
                     # Install/update dependencies in virtual environment
                     print("Installing dependencies...")
                     venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-                    subprocess.run(
-                        [venv_pip, 'install', '-r', 'requirements.txt'],
-                        check=True, capture_output=True
-                    )
-                    print("Dependencies installed successfully")
+                    
+                    # Check if requirements.txt exists
+                    if not os.path.exists('requirements.txt'):
+                        print("Warning: requirements.txt not found, skipping pip install")
+                    else:
+                        # Check if virtual environment pip exists
+                        if not os.path.exists(venv_pip):
+                            print(f"Warning: Virtual environment pip not found at {venv_pip}")
+                            print("Attempting to use system pip...")
+                            venv_pip = 'pip'
+                        
+                        # Run pip install with better error handling
+                        result = subprocess.run(
+                            [venv_pip, 'install', '-r', 'requirements.txt'],
+                            capture_output=True, text=True
+                        )
+                        
+                        if result.returncode == 0:
+                            print("Dependencies installed successfully")
+                            if result.stdout:
+                                print(f"Pip output: {result.stdout}")
+                        else:
+                            print(f"Pip install failed with return code: {result.returncode}")
+                            print(f"Pip stdout: {result.stdout}")
+                            print(f"Pip stderr: {result.stderr}")
+                            # Don't fail the entire deployment for pip issues
+                            print("Continuing deployment despite pip install failure...")
 
                     # Touch the WSGI file to trigger reload
                     wsgi_file = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
