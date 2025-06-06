@@ -155,4 +155,41 @@ def extract_filename_without_extension(filename: str) -> str:
     """Extract filename without extension."""
     if not filename or '.' not in filename:
         return filename
-    return filename.rsplit('.', 1)[0] 
+    return filename.rsplit('.', 1)[0]
+
+def validate_file_size(file_size: int, max_size: int = None) -> bool:
+    """Validate file size against maximum allowed size."""
+    if max_size is None:
+        from config import APIConstants
+        max_size = APIConstants.MAX_FILE_SIZE_BYTES
+    return 0 < file_size <= max_size
+
+def validate_content_type(content_type: Optional[str], expected_types: set) -> bool:
+    """Validate file content type against expected MIME types."""
+    if not content_type:
+        return False
+    
+    # Normalize content type (remove charset and other parameters)
+    main_type = content_type.split(';')[0].strip().lower()
+    return main_type in expected_types
+
+def get_expected_content_types_for_extension(extension: str) -> set:
+    """Get expected MIME types for a file extension."""
+    extension = extension.lower().lstrip('.')
+    
+    content_type_map = {
+        # Image types
+        'png': {'image/png'},
+        'jpg': {'image/jpeg'},
+        'jpeg': {'image/jpeg'},
+        'gif': {'image/gif'},
+        'bmp': {'image/bmp'},
+        'tiff': {'image/tiff'},
+        'webp': {'image/webp'},
+        'avif': {'image/avif'},
+        
+        # GPX types  
+        'gpx': {'application/gpx+xml', 'text/xml', 'application/xml', 'text/plain'}
+    }
+    
+    return content_type_map.get(extension, set()) 

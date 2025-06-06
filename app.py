@@ -24,7 +24,8 @@ from datetime import datetime
 from config import config, APIConstants, FileExtensions
 from utils import (setup_logging, log_api_request, log_api_error, log_request_metrics, 
                    safe_int, validate_file_extension, sanitize_search_input, 
-                   combine_and_sort_results, validate_year_range)
+                   combine_and_sort_results, validate_year_range, validate_file_size,
+                   validate_content_type, get_expected_content_types_for_extension)
 from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
@@ -200,6 +201,33 @@ def upload_gpx():
     if not validate_file_extension(file.filename, FileExtensions.GPX_EXTENSIONS):
         raise FileUploadError('File must be a GPX file', file.filename)
     
+    # Get file extension for content-type validation
+    file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    expected_content_types = get_expected_content_types_for_extension(file_extension)
+    
+    # Validate content type
+    if not validate_content_type(file.content_type, expected_content_types):
+        raise FileUploadError(
+            f'Invalid file type. Expected GPX file but received {file.content_type}', 
+            file.filename
+        )
+    
+    # Read file content to validate size
+    file_content = file.read()
+    if not file_content:
+        raise FileUploadError('Empty file uploaded', file.filename)
+    
+    # Validate file size
+    if not validate_file_size(len(file_content), APIConstants.MAX_FILE_SIZE_BYTES):
+        max_size_mb = APIConstants.MAX_FILE_SIZE_MB
+        raise FileUploadError(
+            f'File too large. Maximum size is {max_size_mb}MB', 
+            file.filename
+        )
+    
+    # Reset file pointer for processing
+    file.seek(0)
+    
     try:
         # Log file processing
         app.logger.info(f"Processing GPX file: {file.filename}")
@@ -362,14 +390,33 @@ def transform_image():
         raise FileUploadError('No file selected')
     
     # Validate file extension
-    if not validate_file_extension(file.filename, app.config['ALLOWED_IMAGE_EXTENSIONS']):
+    if not validate_file_extension(file.filename, FileExtensions.IMAGE_EXTENSIONS):
         raise FileUploadError('File must be a valid image file', file.filename)
+    
+    # Get file extension for content-type validation
+    file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    expected_content_types = get_expected_content_types_for_extension(file_extension)
+    
+    # Validate content type
+    if not validate_content_type(file.content_type, expected_content_types):
+        raise FileUploadError(
+            f'Invalid file type. Expected image file but received {file.content_type}', 
+            file.filename
+        )
     
     try:
         # Read the file content into memory
         file_content = file.read()
         if not file_content:
             raise FileUploadError('Empty file uploaded', file.filename)
+        
+        # Validate file size
+        if not validate_file_size(len(file_content), APIConstants.MAX_FILE_SIZE_BYTES):
+            max_size_mb = APIConstants.MAX_FILE_SIZE_MB
+            raise FileUploadError(
+                f'File too large. Maximum size is {max_size_mb}MB', 
+                file.filename
+            )
 
         app.logger.info(f"Processing image: {file.filename} ({len(file_content)} bytes, {file.content_type})")
 

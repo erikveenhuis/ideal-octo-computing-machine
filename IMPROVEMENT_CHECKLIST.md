@@ -49,7 +49,7 @@
 - [ ] 34. Extract image transformation logic to separate service
 - [ ] 35. Break down large webhook deployment function
 - [ ] 36. Create GPX processing service from upload function  
-- [ ] 37. Replace config file extensions with FileExtensions constants
+- [x] 37. Replace config file extensions with FileExtensions constants
 - [ ] 38. Extract JavaScript from HTML templates to separate files
 - [ ] 39. Create reusable JavaScript modules for map functionality
 - [ ] 40. Add input validation service/middleware for all endpoints
@@ -67,8 +67,8 @@
 - [ ] 50. Implement client-side form validation
 
 ## 🔒 **Security & Validation Enhancements** *(Identified in Review)*
-- [ ] 51. Add file size validation using constants (not just config)
-- [ ] 52. Implement content-type validation for uploads
+- [x] 51. Add file size validation using constants (not just config)
+- [x] 52. Implement content-type validation for uploads
 - [ ] 53. Add image dimension limits for security
 - [ ] 54. Validate webhook payload structure  
 - [ ] 55. Add request timeout configurations
