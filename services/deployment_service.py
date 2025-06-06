@@ -14,6 +14,8 @@ import time
 from typing import Dict, Any, Optional
 from flask import current_app
 
+from exceptions import GitOperationError, DependencyInstallError, ServiceRestartError
+
 
 class DeploymentService:
     """Service for handling deployment operations."""
@@ -100,7 +102,7 @@ class DeploymentService:
                 return
             parent_dir = os.path.dirname(parent_dir)
         
-        raise RuntimeError("Could not find git repository")
+        raise GitOperationError("Could not find git repository", repository_path=os.getcwd())
     
     def _update_code_from_git(self) -> None:
         """Update code from the git repository."""
@@ -131,9 +133,9 @@ class DeploymentService:
                 self._log_info(f"Git reset output: {result.stdout.strip()}")
                 
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"Git operation timed out: {str(e)}")
+            raise GitOperationError(f"Git operation timed out: {str(e)}", git_command="fetch/reset")
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Git operation failed: {e.stderr}")
+            raise GitOperationError(f"Git operation failed: {e.stderr}", git_command="fetch/reset")
     
     def _install_dependencies(self) -> None:
         """Install or update Python dependencies."""
@@ -167,8 +169,10 @@ class DeploymentService:
                     
         except subprocess.TimeoutExpired:
             self._log_error("Pip install timed out (continuing anyway)")
+            # Don't raise exception - dependency issues shouldn't stop deployment
         except Exception as e:
             self._log_error(f"Pip install error (continuing anyway): {str(e)}")
+            # Don't raise exception - dependency issues shouldn't stop deployment
     
     def _get_pip_executable(self) -> str:
         """Determine the correct pip executable to use."""
@@ -199,9 +203,11 @@ class DeploymentService:
             self._log_info("Touched WSGI file again to ensure new workers start")
             
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Failed to reload WSGI application: {str(e)}")
+            raise ServiceRestartError(f"Failed to reload WSGI application: {str(e)}", 
+                                     service_name="WSGI", restart_method="touch")
         except subprocess.TimeoutExpired:
-            raise RuntimeError("WSGI reload operation timed out")
+            raise ServiceRestartError("WSGI reload operation timed out", 
+                                     service_name="WSGI", restart_method="touch")
     
     def _log_info(self, message: str) -> None:
         """Log info message."""

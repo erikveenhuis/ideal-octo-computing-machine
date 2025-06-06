@@ -75,7 +75,8 @@ from config import config, APIConstants
 from utils import (setup_logging, log_request_metrics,
                    safe_int, sanitize_search_input, combine_and_sort_results,
                    validate_year_range, validate_github_webhook_payload, get_git_commit_info)
-from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
+from error_handlers import register_error_handlers
+from exceptions import APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
 from services.image_transform_service import ImageTransformService

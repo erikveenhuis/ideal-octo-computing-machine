@@ -21,7 +21,10 @@ from utils import (
     validate_image_dimensions, calculate_image_memory_usage,
     get_expected_content_types_for_extension
 )
-from error_handlers import FileUploadError, APIError
+from exceptions import (
+    APIError, FileUploadError, FileValidationError, FileSizeError, 
+    ImageProcessingError, ImageTransformServiceError, ConfigurationError
+)
 
 
 class ImageTransformService:
