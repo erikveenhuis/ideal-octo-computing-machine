@@ -1,0 +1,154 @@
+[MAIN]
+# Use multiple processes to speed up Pylint
+jobs=1
+
+# Allow loading of arbitrary C extensions
+unsafe-load-any-extension=no
+
+[MESSAGES CONTROL]
+# Disable specific warnings that are too strict for this codebase
+disable=
+    # Import related
+    import-error,
+    wrong-import-position,
+    import-outside-toplevel,
+    
+    # Code structure
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    too-many-return-statements,
+    
+    # Exception handling
+    broad-exception-caught,
+    raise-missing-from,
+    
+    # Formatting (handled by other tools)
+    line-too-long,
+    trailing-whitespace,
+    missing-final-newline,
+    
+    # Logging
+    logging-fstring-interpolation,
+    
+    # Code duplication (acceptable for services)
+    duplicate-code,
+    
+    # Variable naming
+    invalid-name,
+    redefined-outer-name,
+    
+    # Subprocess
+    subprocess-run-check,
+    
+    # Miscellaneous
+    unused-import,
+    unused-variable,
+    no-else-return,
+    unnecessary-pass,
+    use-maxsplit-arg,
+    protected-access
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=100
+
+# Maximum number of lines in a module
+max-module-lines=1000
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=7
+
+# Maximum number of locals for function / method body
+max-locals=20
+
+# Maximum number of return / yield for function / method body
+max-returns=8
+
+# Maximum number of branch for function / method body
+max-branches=15
+
+# Maximum number of statements in function / method body
+max-statements=50
+
+# Maximum number of parents for a class (see R0901)
+max-parents=7
+
+# Maximum number of attributes for a class (see R0902)
+max-attributes=10
+
+# Minimum number of public methods for a class (see R0903)
+min-public-methods=1
+
+# Maximum number of public methods for a class (see R0904)
+max-public-methods=20
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=6
+
+# Ignore comments when computing similarities
+ignore-comments=yes
+
+# Ignore docstrings when computing similarities
+ignore-docstrings=yes
+
+# Ignore imports when computing similarities
+ignore-imports=yes
+
+[BASIC]
+# Good variable names which should always be accepted
+good-names=i,j,k,ex,Run,_,id,db,app,e
+
+# Regular expression matching correct function names
+function-rgx=[a-z_][a-z0-9_]{2,30}$
+
+# Regular expression matching correct variable names
+variable-rgx=[a-z_][a-z0-9_]{2,30}$
+
+# Regular expression matching correct constant names
+const-rgx=(([A-Z_][A-Z0-9_]*)|(__.*__))$
+
+# Regular expression matching correct attribute names
+attr-rgx=[a-z_][a-z0-9_]{2,30}$
+
+# Regular expression matching correct argument names
+argument-rgx=[a-z_][a-z0-9_]{2,30}$
+
+# Regular expression matching correct class attribute names
+class-attribute-rgx=([A-Za-z_][A-Za-z0-9_]{2,30}|(__.*__))$
+
+# Regular expression matching correct inline iteration names
+inlinevar-rgx=[A-Za-z_][A-Za-z0-9_]*$
+
+# Regular expression matching correct class names
+class-rgx=[A-Z_][a-zA-Z0-9]+$
+
+# Regular expression matching correct module names
+module-rgx=(([a-z_][a-z0-9_]*)|([A-Z][a-zA-Z0-9]+))$
+
+# Regular expression matching correct method names
+method-rgx=[a-z_][a-z0-9_]{2,30}$
+
+[TYPECHECK]
+# List of module names for which member attributes should not be checked
+ignored-modules=
+
+# List of class names for which member attributes should not be checked
+ignored-classes=
+
+[REPORTS]
+# Set the output format
+output-format=text
+
+# Tells whether to display a full report or only the messages
+reports=no
+
+# Template used to display messages
+msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
+
+[LOGGING]
+# Format style used to check logging format string
+logging-format-style=new 

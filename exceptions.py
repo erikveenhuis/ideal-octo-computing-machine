@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 
 class AppError(Exception):
     """Base exception for all application errors."""
-    
+
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(message)
         self.message = message
@@ -22,7 +22,7 @@ class AppError(Exception):
 
 class ConfigurationError(AppError):
     """Raised when there's a configuration issue."""
-    
+
     def __init__(self, message: str, config_key: Optional[str] = None):
         super().__init__(message)
         self.config_key = config_key
@@ -34,8 +34,8 @@ class ConfigurationError(AppError):
 
 class APIError(AppError):
     """Base exception for API-related errors."""
-    
-    def __init__(self, message: str, source: Optional[str] = None, 
+
+    def __init__(self, message: str, source: Optional[str] = None,
                  status_code: int = 500, response_data: Optional[Dict] = None):
         super().__init__(message, {'source': source, 'status_code': status_code})
         self.source = source
@@ -45,7 +45,7 @@ class APIError(AppError):
 
 class ExternalAPIError(APIError):
     """Raised when external API calls fail."""
-    
+
     def __init__(self, message: str, api_name: str, endpoint: Optional[str] = None,
                  status_code: int = 500, response_data: Optional[Dict] = None):
         super().__init__(message, api_name, status_code, response_data)
@@ -55,7 +55,7 @@ class ExternalAPIError(APIError):
 
 class APITimeoutError(APIError):
     """Raised when API calls timeout."""
-    
+
     def __init__(self, message: str, source: str, timeout_duration: Optional[float] = None):
         super().__init__(message, source, 408)
         self.timeout_duration = timeout_duration
@@ -63,7 +63,7 @@ class APITimeoutError(APIError):
 
 class APIRateLimitError(APIError):
     """Raised when API rate limits are exceeded."""
-    
+
     def __init__(self, message: str, source: str, retry_after: Optional[int] = None):
         super().__init__(message, source, 429)
         self.retry_after = retry_after
@@ -75,8 +75,8 @@ class APIRateLimitError(APIError):
 
 class ValidationError(AppError):
     """Base exception for validation errors."""
-    
-    def __init__(self, message: str, field: Optional[str] = None, 
+
+    def __init__(self, message: str, field: Optional[str] = None,
                  value: Optional[Any] = None):
         super().__init__(message, {'field': field, 'value': value})
         self.field = field
@@ -90,7 +90,7 @@ class InputValidationError(ValidationError):
 
 class DataValidationError(ValidationError):
     """Raised when data format validation fails."""
-    
+
     def __init__(self, message: str, expected_format: Optional[str] = None,
                  received_format: Optional[str] = None):
         super().__init__(message)
@@ -104,7 +104,7 @@ class DataValidationError(ValidationError):
 
 class FileError(AppError):
     """Base exception for file-related errors."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  file_size: Optional[int] = None):
         super().__init__(message, {'filename': filename, 'file_size': file_size})
@@ -119,7 +119,7 @@ class FileUploadError(FileError):
 
 class FileValidationError(FileError):
     """Raised when file validation fails."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  expected_types: Optional[list] = None, actual_type: Optional[str] = None):
         super().__init__(message, filename)
@@ -129,7 +129,7 @@ class FileValidationError(FileError):
 
 class FileSizeError(FileError):
     """Raised when file size limits are exceeded."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  max_size: Optional[int] = None, actual_size: Optional[int] = None):
         super().__init__(message, filename, actual_size)
@@ -139,7 +139,7 @@ class FileSizeError(FileError):
 
 class FileProcessingError(FileError):
     """Raised when file processing fails."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  processing_stage: Optional[str] = None):
         super().__init__(message, filename)
@@ -152,7 +152,7 @@ class FileProcessingError(FileError):
 
 class GPXProcessingError(FileProcessingError):
     """Raised when GPX file processing fails."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  gpx_element: Optional[str] = None):
         super().__init__(message, filename, 'GPX parsing')
@@ -161,7 +161,7 @@ class GPXProcessingError(FileProcessingError):
 
 class ImageProcessingError(FileProcessingError):
     """Raised when image processing fails."""
-    
+
     def __init__(self, message: str, filename: Optional[str] = None,
                  image_format: Optional[str] = None, dimensions: Optional[tuple] = None):
         super().__init__(message, filename, 'Image processing')
@@ -171,7 +171,7 @@ class ImageProcessingError(FileProcessingError):
 
 class SearchError(AppError):
     """Raised when search operations fail."""
-    
+
     def __init__(self, message: str, search_term: Optional[str] = None,
                  search_source: Optional[str] = None):
         super().__init__(message, {'search_term': search_term, 'source': search_source})
@@ -185,7 +185,7 @@ class SearchError(AppError):
 
 class DeploymentError(AppError):
     """Base exception for deployment-related errors."""
-    
+
     def __init__(self, message: str, stage: Optional[str] = None,
                  command: Optional[str] = None):
         super().__init__(message, {'stage': stage, 'command': command})
@@ -195,7 +195,7 @@ class DeploymentError(AppError):
 
 class GitOperationError(DeploymentError):
     """Raised when git operations fail."""
-    
+
     def __init__(self, message: str, git_command: Optional[str] = None,
                  repository_path: Optional[str] = None):
         super().__init__(message, 'Git operation', git_command)
@@ -205,7 +205,7 @@ class GitOperationError(DeploymentError):
 
 class DependencyInstallError(DeploymentError):
     """Raised when dependency installation fails."""
-    
+
     def __init__(self, message: str, package_manager: str = 'pip',
                  requirements_file: Optional[str] = None):
         super().__init__(message, 'Dependency installation', package_manager)
@@ -215,7 +215,7 @@ class DependencyInstallError(DeploymentError):
 
 class ServiceRestartError(DeploymentError):
     """Raised when service restart operations fail."""
-    
+
     def __init__(self, message: str, service_name: Optional[str] = None,
                  restart_method: Optional[str] = None):
         super().__init__(message, 'Service restart', restart_method)
@@ -229,7 +229,7 @@ class ServiceRestartError(DeploymentError):
 
 class UitslagenServiceError(ExternalAPIError):
     """Raised when Uitslagen.nl service operations fail."""
-    
+
     def __init__(self, message: str, endpoint: Optional[str] = None,
                  status_code: int = 500):
         super().__init__(message, 'Uitslagen.nl', endpoint, status_code)
@@ -237,7 +237,7 @@ class UitslagenServiceError(ExternalAPIError):
 
 class SporthiveServiceError(ExternalAPIError):
     """Raised when Sporthive API operations fail."""
-    
+
     def __init__(self, message: str, endpoint: Optional[str] = None,
                  status_code: int = 500):
         super().__init__(message, 'Sporthive', endpoint, status_code)
@@ -245,7 +245,7 @@ class SporthiveServiceError(ExternalAPIError):
 
 class ImageTransformServiceError(ExternalAPIError):
     """Raised when Replicate image transformation fails."""
-    
+
     def __init__(self, message: str, model_id: Optional[str] = None,
                  status_code: int = 500):
         super().__init__(message, 'Replicate', model_id, status_code)
@@ -259,14 +259,14 @@ class ImageTransformServiceError(ExternalAPIError):
 def get_exception_hierarchy() -> Dict[str, list]:
     """
     Return the exception hierarchy for documentation purposes.
-    
+
     Returns:
         Dictionary mapping base exceptions to their subclasses
     """
     return {
         'AppError': [
             'ConfigurationError',
-            'APIError', 'ValidationError', 'FileError', 
+            'APIError', 'ValidationError', 'FileError',
             'SearchError', 'DeploymentError'
         ],
         'APIError': [
@@ -293,10 +293,10 @@ def get_exception_hierarchy() -> Dict[str, list]:
 def is_user_error(exception: Exception) -> bool:
     """
     Determine if an exception represents a user error (4xx) or system error (5xx).
-    
+
     Args:
         exception: The exception to check
-        
+
     Returns:
         True if it's a user error, False if it's a system error
     """
@@ -304,17 +304,17 @@ def is_user_error(exception: Exception) -> bool:
         ValidationError, InputValidationError, DataValidationError,
         FileUploadError, FileValidationError, FileSizeError
     )
-    
+
     return isinstance(exception, user_error_types)
 
 
 def get_error_category(exception: Exception) -> str:
     """
     Get the category of an exception for logging and monitoring.
-    
+
     Args:
         exception: The exception to categorize
-        
+
     Returns:
         String category name
     """
@@ -329,4 +329,4 @@ def get_error_category(exception: Exception) -> str:
     elif isinstance(exception, ConfigurationError):
         return 'configuration'
     else:
-        return 'system' 
+        return 'system'

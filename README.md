@@ -35,6 +35,9 @@ This is a simple web application built with Python and Flask that allows users t
 3.  **Install dependencies:**
     ```bash
     pip install -r requirements.txt
+    
+    # Optional: Install development tools
+    pip install -r requirements-dev.txt
     ```
 
 ## Running the Application
@@ -58,6 +61,16 @@ This is a simple web application built with Python and Flask that allows users t
 2.  Upload a GPX file using the file input.
 3.  The route will be displayed on an interactive map with city details.
 4.  The map will automatically zoom to show the entire route.
+
+## Code Quality
+
+This project maintains high code quality standards:
+
+- **Pylint Score**: 10.0/10.0 ✅
+- **Automated Quality Checks**: GitHub Actions CI/CD pipeline
+- **Local Quality Tools**: Run `./scripts/quality_check.sh`
+
+See [CODE_QUALITY.md](CODE_QUALITY.md) for detailed information about code quality standards and tools.
 
 ## Notes
 

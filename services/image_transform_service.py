@@ -22,7 +22,7 @@ from utils import (
     get_expected_content_types_for_extension
 )
 from exceptions import (
-    APIError, FileUploadError, FileValidationError, FileSizeError, 
+    APIError, FileUploadError, FileValidationError, FileSizeError,
     ImageProcessingError, ImageTransformServiceError, ConfigurationError
 )
 

@@ -71,7 +71,7 @@ class Config:
         'X-Frame-Options': 'DENY',
         'X-XSS-Protection': '1; mode=block',
     }
-    
+
     # Deployment Configuration
     WSGI_FILE_PATH = os.environ.get('WSGI_FILE_PATH')
     VENV_PIP_PATH = os.environ.get('VENV_PIP_PATH')
@@ -89,7 +89,7 @@ class ProductionConfig(Config):
     DEVELOPMENT = False
     # Override with more secure settings
     RATELIMIT_STORAGE_URL = os.environ.get('REDIS_URL', 'memory://')
-    
+
     # Production deployment paths (PythonAnywhere)
     WSGI_FILE_PATH = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
     VENV_PIP_PATH = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'

@@ -22,15 +22,15 @@ class ErrorHandler:
         # Determine if it's a user error (4xx) or system error (5xx)
         is_user_fault = is_user_error(e)
         status_code = 400 if is_user_fault else 500
-        
+
         # Override status code if the exception has one
         if hasattr(e, 'status_code') and e.status_code:
             status_code = e.status_code
-        
+
         # Log with appropriate level
         log_level = 'warning' if is_user_fault else 'error'
         error_category = get_error_category(e)
-        
+
         getattr(current_app.logger, log_level)(
             f"{error_category.title()} Error: {str(e)} | "
             f"Type: {type(e).__name__} | "
@@ -43,7 +43,7 @@ class ErrorHandler:
             'category': error_category,
             'success': False
         }
-        
+
         # Add specific fields based on exception type
         if hasattr(e, 'field'):
             error_data['field'] = e.field
@@ -85,7 +85,7 @@ class ErrorHandler:
             'success': False,
             'category': 'external_api'
         }
-        
+
         if hasattr(e, 'endpoint'):
             error_data['endpoint'] = e.endpoint
         if hasattr(e, 'response_data'):
@@ -139,7 +139,7 @@ class ErrorHandler:
             'success': False,
             'category': 'file_handling'
         }
-        
+
         # Add specific context for different file error types
         if hasattr(e, 'expected_types'):
             error_data['expected_types'] = e.expected_types

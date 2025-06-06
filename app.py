@@ -19,10 +19,10 @@ if __name__ == '__main__':
         # Only run auto-update in production environment
         environment = os.environ.get('FLASK_ENV', 'development')
         auto_update = os.environ.get('AUTO_UPDATE_ON_STARTUP', 'false').lower() == 'true'
-        
+
         if environment == 'production' or auto_update:
             print("Starting up - checking for updates...")
-            
+
             # Git pull latest changes
             if os.path.exists('.git'):
                 print("Pulling latest code...")
@@ -35,22 +35,22 @@ if __name__ == '__main__':
                     print(f"Git pull failed: {result.stderr}")
             else:
                 print("Not in a git repository, skipping git pull")
-            
+
             # Install/update dependencies BEFORE imports that might fail
             if os.path.exists('requirements.txt'):
                 print("Installing/updating dependencies...")
                 venv_pip = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-                
+
                 # Check if virtual environment pip exists, fallback to system pip
                 if not os.path.exists(venv_pip):
                     print(f"Virtual environment pip not found at {venv_pip}, using system pip")
                     venv_pip = 'pip'
-                
+
                 result = subprocess.run(
                     [venv_pip, 'install', '-r', 'requirements.txt'],
                     capture_output=True, text=True
                 )
-                
+
                 if result.returncode == 0:
                     print("Dependencies installed successfully")
                 else:
@@ -59,7 +59,7 @@ if __name__ == '__main__':
                 print("No requirements.txt found, skipping dependency installation")
         else:
             print(f"Starting in {environment} mode - skipping auto-update")
-            
+
     except Exception as e:
         print(f"Startup update failed: {str(e)}")
         print("Continuing with app startup...")
