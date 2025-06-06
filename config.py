@@ -82,3 +82,50 @@ config = {
     'testing': TestingConfig,
     'default': DevelopmentConfig
 } 
+
+# API Constants
+class APIConstants:
+    """Constants for API operations and data processing."""
+    
+    # Search and input limits
+    MAX_SEARCH_INPUT_LENGTH = 100
+    MIN_SEARCH_INPUT_LENGTH = 1
+    
+    # HTTP status codes
+    HTTP_TIMEOUT = 408
+    HTTP_SERVICE_UNAVAILABLE = 503
+    HTTP_BAD_REQUEST = 400
+    HTTP_INTERNAL_ERROR = 500
+    
+    # File upload limits
+    MAX_FILE_SIZE_MB = 10
+    MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+    
+    # Result processing
+    MAX_RESULTS_PER_PAGE = 100
+    DEFAULT_RESULTS_PER_PAGE = 20
+    
+    # Request headers
+    DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    
+    # HTML parsing
+    EXPECTED_RESULT_COLUMNS = 7
+    
+    # Image processing
+    MAX_IMAGE_DIMENSION = 2048
+    DEFAULT_IMAGE_QUALITY = 85
+
+# URL patterns and endpoints
+class URLPatterns:
+    """URL patterns for external services."""
+    
+    UITSLAGEN_SEARCH_PATTERN = "?naam={name}&gbjr=#"
+    SPORTHIVE_SEARCH_PATTERN = "/search?q={name}"
+
+# File extensions
+class FileExtensions:
+    """Allowed file extensions for uploads."""
+    
+    GPX_EXTENSIONS = {'gpx'}
+    IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'avif'}
+    ALL_ALLOWED = GPX_EXTENSIONS | IMAGE_EXTENSIONS 

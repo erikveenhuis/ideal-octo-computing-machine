@@ -21,9 +21,13 @@ import time
 from datetime import datetime
 
 # Import our custom modules
-from config import config
-from utils import setup_logging, log_api_request, log_api_error, log_request_metrics, safe_int, validate_file_extension, sanitize_search_input
+from config import config, APIConstants, FileExtensions
+from utils import (setup_logging, log_api_request, log_api_error, log_request_metrics, 
+                   safe_int, validate_file_extension, sanitize_search_input, 
+                   combine_and_sort_results, validate_year_range)
 from error_handlers import register_error_handlers, APIError, ValidationError, FileUploadError
+from services.uitslagen_service import UitslagenService
+from services.sporthive_service import SporthiveService
 
 def create_app(config_name=None):
     """Application factory pattern."""
@@ -61,236 +65,34 @@ def create_app(config_name=None):
 # Create app instance
 app, limiter, csrf = create_app()
 
+# Initialize services
+uitslagen_service = UitslagenService(
+    base_url=app.config['UITSLAGEN_BASE_URL'],
+    timeout=app.config['REQUEST_TIMEOUT']
+)
+
+sporthive_service = SporthiveService(
+    base_url=app.config['SPORTHIVE_API_BASE'],
+    timeout=app.config['SPORTHIVE_TIMEOUT'],
+    default_count=app.config['DEFAULT_RESULT_COUNT'],
+    default_country=app.config['DEFAULT_COUNTRY_CODE'],
+    default_offset=app.config['DEFAULT_RESULT_OFFSET']
+)
+
 # Configure API tokens from config
 if not app.config['REPLICATE_API_TOKEN']:
     app.logger.warning("REPLICATE_API_TOKEN not configured. Image transformation will be disabled.")
 
 app.logger.info(f"Available image decoders: {list(Image.OPEN.keys())}")
 
-def get_uitslagen_results(name):
+# Wrapper functions for backward compatibility and service integration
+def get_uitslagen_results(name: str) -> list:
     """Fetches results from uitslagen.nl for a given name."""
-    start_time = time.time()
-    source = "Uitslagen.nl"
-    
-    try:
-        # Sanitize and validate input
-        name = sanitize_search_input(name)
-        if not name:
-            raise ValidationError("Name cannot be empty", "name")
-        
-        # URL encode the name
-        encoded_name = urllib.parse.quote_plus(name)
-        url = f"{app.config['UITSLAGEN_BASE_URL']}?naam={encoded_name}&gbjr=#"
-        
-        # Log the request
-        log_api_request(source, url)
-        
-        # Send request with a user agent to avoid being blocked
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=app.config['REQUEST_TIMEOUT'])
-        response.raise_for_status()
-        
-        # Parse the HTML content
-        soup = BeautifulSoup(response.text, 'lxml')
-        results = []
-        
-        # Check if search is temporarily disabled
-        error_message = soup.find('div', style=lambda x: x and 'background-color:#ffcccc' in x)
-        if error_message:
-            error_text = error_message.get_text(strip=True)
-            if 'tijdelijk even niet beschikbaar' in error_text or 'temporarily unavailable' in error_text.lower():
-                app.logger.warning(f"{source} search is temporarily disabled: {error_text}")
-                raise APIError(f"Search on {source} is temporarily disabled. Try the Uitslagen.nl mobile app instead.", source, 503)
-        
-        # Find all result sections (try multiple possible selectors)
-        result_sections = soup.find_all('div', class_='zk-kader')
-        if not result_sections:
-            # Try alternative selectors if the structure has changed
-            result_sections = soup.find_all('div', class_=['result-item', 'result-section', 'zoekresultaat'])
-            if not result_sections:
-                # Look for table-based results
-                result_sections = soup.find_all('table', class_=['result-table', 'zoekresultaat-tabel'])
-        
-        app.logger.info(f"Found {len(result_sections)} result sections from {source}")
-        
-        # Process each result section
-        for section in result_sections:
-            try:
-                # Find the event name and date from the zk-evnm row
-                event_row = section.find('tr', class_='zk-evnm')
-                if not event_row:
-                    app.logger.debug("Skipping section: No event row found")
-                    continue
-                
-                # Get the event name and date from the th element
-                event_th = event_row.find('th', colspan='6')
-                if not event_th:
-                    app.logger.debug("Skipping section: No event details found")
-                    continue
-                
-                # Split the text into date and name
-                event_text = event_th.text.strip()
-                event_parts = event_text.split(' ', 1)
-                if len(event_parts) != 2:
-                    app.logger.debug(f"Skipping section: Invalid event format: {event_text}")
-                    continue
-                
-                event_date = event_parts[0]
-                event_name = event_parts[1]
-                
-                # Find the race name from the db row
-                race_row = section.find('tr', class_='db')
-                if not race_row:
-                    app.logger.debug("Skipping section: No race row found")
-                    continue
-                
-                race_name = race_row.find('td').text.strip()
-                
-                # Extract classification details
-                classification = {}
-                classification_rows = section.find_all('tr')
-                for row in classification_rows:
-                    # Skip header rows
-                    if 'class' in row.attrs and row['class'] in ['zk-evnm', 'db', 'lb']:
-                        continue
-                    
-                    cells = row.find_all('td')
-                    if len(cells) >= 7:  # We expect 7 columns based on the HTML structure
-                        # Clean up pace values by removing units and extra spaces
-                        pace_kmh = cells[5].text.strip().replace(' km/u', '').strip()
-                        pace_minkm = cells[6].text.strip().replace(' min/km', '').strip()
-                        
-                        classification = {
-                            'rank': cells[0].text.strip(),
-                            'name': cells[1].text.strip(),
-                            'club': cells[2].text.strip(),
-                            'gun_time': cells[3].text.strip(),
-                            'chip_time': cells[4].text.strip(),
-                            'pace_kmh': pace_kmh,
-                            'pace_minkm': pace_minkm
-                        }
-                
-                # Add to results if we have the minimum required data
-                if event_name and event_date and race_name:
-                    results.append({
-                        'event': {
-                            'name': event_name,
-                            'date': event_date
-                        },
-                        'race': {
-                            'name': race_name
-                        },
-                        'classification': classification
-                    })
-            except Exception as e:
-                app.logger.warning(f"Error processing result section: {str(e)}")
-                continue
-        
-        # Log successful completion
-        duration = time.time() - start_time
-        log_api_request(source, url, duration)
-        app.logger.info(f"Successfully retrieved {len(results)} results from {source}")
-        
-        return results
-    except requests.exceptions.Timeout:
-        log_api_error(source, "Request timeout", url)
-        raise APIError(f"Timeout while fetching data from {source}", source, 408)
-    except requests.exceptions.RequestException as e:
-        log_api_error(source, str(e), url)
-        raise APIError(f"Network error while fetching data from {source}", source, 502)
-    except ValidationError:
-        raise  # Re-raise validation errors
-    except Exception as e:
-        log_api_error(source, str(e), url)
-        raise APIError(f"Unexpected error while fetching data from {source}", source, 500)
+    return uitslagen_service.search_results(name)
 
-def get_sporthive_results(name, year=None):
+def get_sporthive_results(name: str, year: int = None) -> list:
     """Fetches results from Sporthive API for a given name and optional year."""
-    start_time = time.time()
-    source = "Sporthive"
-    
-    try:
-        # Sanitize and validate input
-        name = sanitize_search_input(name)
-        if not name:
-            raise ValidationError("Name cannot be empty", "name")
-        
-        # URL encode the name
-        encoded_name = urllib.parse.quote_plus(name)
-        base_api_url = f"{app.config['SPORTHIVE_API_BASE']}/recentclassifications?count={app.config['DEFAULT_RESULT_COUNT']}&country={app.config['DEFAULT_COUNTRY_CODE']}&offset={app.config['DEFAULT_RESULT_OFFSET']}&q={encoded_name}"
-        
-        # Add year parameter if provided
-        api_url = base_api_url
-        if year:
-            year_int = safe_int(year)
-            if year_int and 1900 < year_int < 2100:
-                api_url = f"{base_api_url}&year={year_int}"
-            elif year:
-                app.logger.warning(f"Ignoring invalid year: {year}")
-        
-        # Log the request
-        log_api_request(source, api_url)
-        
-        # Send request
-        response = requests.get(api_url, timeout=app.config['SPORTHIVE_TIMEOUT'])
-        response.raise_for_status()
-        data = response.json()
-        
-        # Extract and format results
-        results = []
-        for classification in data.get('fullClassifications', []):
-            # Format the date
-            event_date = classification.get('event', {}).get('date', '')
-            if event_date:
-                try:
-                    # Parse the ISO format date
-                    date_obj = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                    # Format to YYYY-MM-DD HH:mm
-                    event_date = date_obj.strftime('%Y-%m-%d %H:%M')
-                except (ValueError, AttributeError):
-                    app.logger.warning(f"Error formatting date: {event_date}")
-            
-            result = {
-                'event': {
-                    'name': classification.get('event', {}).get('name', ''),
-                    'date': event_date
-                },
-                'race': {
-                    'name': classification.get('race', {}).get('name', '')
-                },
-                'classification': {
-                    'displayDistance': classification.get('race', {}).get('displayDistance', ''),
-                    'category': classification.get('classification', {}).get('category', ''),
-                    'bib': classification.get('classification', {}).get('bib', ''),
-                    'chipTime': classification.get('classification', {}).get('chipTime', ''),
-                    'gunTime': classification.get('classification', {}).get('gunTime', ''),
-                    'rank': classification.get('classification', {}).get('rank', ''),
-                    'genderRank': classification.get('classification', {}).get('genderRank', ''),
-                    'categoryRank': classification.get('classification', {}).get('categoryRank', '')
-                }
-            }
-            results.append(result)
-        
-        # Log successful completion
-        duration = time.time() - start_time
-        log_api_request(source, api_url, duration)
-        app.logger.info(f"Successfully retrieved {len(results)} results from {source}")
-        
-        return results
-    except requests.exceptions.Timeout:
-        log_api_error(source, "Request timeout", api_url)
-        raise APIError(f"Timeout while fetching data from {source}", source, 408)
-    except requests.exceptions.RequestException as e:
-        log_api_error(source, str(e), api_url)
-        raise APIError(f"Network error while fetching data from {source}", source, 502)
-    except ValidationError:
-        raise  # Re-raise validation errors
-    except Exception as e:
-        log_api_error(source, str(e), api_url)
-        raise APIError(f"Unexpected error while fetching data from {source}", source, 500)
+    return sporthive_service.search_results(name, year)
 
 @app.route('/')
 @log_request_metrics
@@ -302,63 +104,74 @@ def index():
 @limiter.limit(app.config['SEARCH_RATE_LIMIT'])
 @log_request_metrics
 def search():
+    """Handle search requests for athlete results."""
     name = request.args.get('name', '').strip()
     year = request.args.get('year', '').strip()
     
+    # Validate inputs
     if not name:
         raise ValidationError('Please enter a name to search', 'name')
     
-    # Sanitize inputs
     name = sanitize_search_input(name)
-    
-    # Validate year if provided
-    if year:
-        year_int = safe_int(year)
-        if not year_int or not (1900 < year_int < 2100):
-            raise ValidationError('Please enter a valid year between 1901 and 2099', 'year')
+    year_int = _validate_year_input(year) if year else None
     
     try:
-        # Initialize results
-        sporthive_results = []
-        uitslagen_results = []
+        # Fetch results from both sources with error handling
+        results_list = []
         api_errors = []
         
-        # Fetch results from both sources (continue even if one fails)
-        try:
-            sporthive_results = get_sporthive_results(name, year)
-            # Add source to each result
-            for result in sporthive_results:
-                result['source'] = 'Sporthive'
-        except APIError as e:
-            app.logger.warning(f"Sporthive API failed: {e.message}")
-            api_errors.append(f"Sporthive: {e.message}")
+        # Fetch Sporthive results
+        sporthive_results = _fetch_service_results(
+            lambda: get_sporthive_results(name, year_int),
+            'Sporthive',
+            api_errors
+        )
+        if sporthive_results:
+            results_list.append(sporthive_results)
         
-        try:
-            uitslagen_results = get_uitslagen_results(name)
-            # Add source to each result
-            for result in uitslagen_results:
-                result['source'] = 'Uitslagen.nl'
-        except APIError as e:
-            app.logger.warning(f"Uitslagen API failed: {e.message}")
-            api_errors.append(f"Uitslagen.nl: {e.message}")
+        # Fetch Uitslagen results
+        uitslagen_results = _fetch_service_results(
+            lambda: get_uitslagen_results(name),
+            'Uitslagen.nl',
+            api_errors
+        )
+        if uitslagen_results:
+            results_list.append(uitslagen_results)
         
-        # Combine results
-        all_results = sporthive_results + uitslagen_results
+        # Combine and sort results
+        all_results = combine_and_sort_results(results_list, 'event.date')
         
-        # Sort results by date in descending order
-        try:
-            all_results.sort(key=lambda x: x['event']['date'], reverse=True)
-        except (KeyError, TypeError) as e:
-            app.logger.warning(f"Error sorting results: {e}")
-            # Continue with unsorted results
-        
-        return render_template('results.html', name=name, year=year, results=all_results, api_errors=api_errors)
+        return render_template('results.html', 
+                             name=name, 
+                             year=year, 
+                             results=all_results, 
+                             api_errors=api_errors)
     
     except ValidationError:
         raise  # Re-raise validation errors
     except Exception as e:
         app.logger.error(f"Unexpected error in search: {str(e)}")
-        raise APIError("An unexpected error occurred while searching", "Search Service", 500)
+        raise APIError("An unexpected error occurred while searching", "Search Service", APIConstants.HTTP_INTERNAL_ERROR)
+
+def _validate_year_input(year: str) -> int:
+    """Validate year input parameter."""
+    year_int = safe_int(year)
+    if not validate_year_range(year_int):
+        raise ValidationError('Please enter a valid year between 1901 and 2099', 'year')
+    return year_int
+
+def _fetch_service_results(service_call, source_name: str, api_errors: list) -> list:
+    """Fetch results from a service with error handling."""
+    try:
+        results = service_call()
+        # Add source to each result
+        for result in results:
+            result['source'] = source_name
+        return results
+    except APIError as e:
+        app.logger.warning(f"{source_name} API failed: {e.message}")
+        api_errors.append(f"{source_name}: {e.message}")
+        return []
 
 @app.route('/gpx')
 @log_request_metrics
@@ -384,7 +197,7 @@ def upload_gpx():
         raise FileUploadError('No file selected')
     
     # Validate file extension
-    if not validate_file_extension(file.filename, app.config['ALLOWED_GPX_EXTENSIONS']):
+    if not validate_file_extension(file.filename, FileExtensions.GPX_EXTENSIONS):
         raise FileUploadError('File must be a GPX file', file.filename)
     
     try:

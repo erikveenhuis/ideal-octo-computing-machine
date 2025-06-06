@@ -1,10 +1,12 @@
-from flask import jsonify, render_template, request, current_app
+"""Error handling module for the Flask application."""
+from typing import Optional, Tuple, Any
+from flask import jsonify, render_template, request, current_app, Flask
 import traceback
 from werkzeug.exceptions import HTTPException
 
 class APIError(Exception):
     """Custom exception for API-related errors."""
-    def __init__(self, message, source=None, status_code=500):
+    def __init__(self, message: str, source: Optional[str] = None, status_code: int = 500):
         super().__init__(message)
         self.message = message
         self.source = source
@@ -12,14 +14,14 @@ class APIError(Exception):
 
 class ValidationError(Exception):
     """Custom exception for validation errors."""
-    def __init__(self, message, field=None):
+    def __init__(self, message: str, field: Optional[str] = None):
         super().__init__(message)
         self.message = message
         self.field = field
 
 class FileUploadError(Exception):
     """Custom exception for file upload errors."""
-    def __init__(self, message, filename=None):
+    def __init__(self, message: str, filename: Optional[str] = None):
         super().__init__(message)
         self.message = message
         self.filename = filename
@@ -28,7 +30,7 @@ class ErrorHandler:
     """Centralized error handling service."""
     
     @staticmethod
-    def handle_api_error(e, source="Unknown API"):
+    def handle_api_error(e: APIError, source: str = "Unknown API") -> Tuple[Any, int]:
         """Handle external API errors."""
         error_msg = f"Failed to fetch data from {source}"
         
@@ -49,7 +51,7 @@ class ErrorHandler:
                              title="Service Error"), 500
     
     @staticmethod
-    def handle_validation_error(e):
+    def handle_validation_error(e: ValidationError) -> Tuple[Any, int]:
         """Handle validation errors."""
         current_app.logger.warning(f"Validation Error: {str(e)}")
         
@@ -65,7 +67,7 @@ class ErrorHandler:
                              title="Validation Error"), 400
     
     @staticmethod
-    def handle_file_upload_error(e):
+    def handle_file_upload_error(e: FileUploadError) -> Tuple[Any, int]:
         """Handle file upload errors."""
         current_app.logger.warning(f"File Upload Error: {str(e)}")
         
@@ -80,7 +82,7 @@ class ErrorHandler:
                              error=e.message, 
                              title="File Upload Error"), 400
 
-def register_error_handlers(app):
+def register_error_handlers(app: Flask) -> None:
     """Register error handlers with the Flask app."""
     
     @app.errorhandler(404)
