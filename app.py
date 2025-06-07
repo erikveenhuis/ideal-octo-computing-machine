@@ -94,7 +94,7 @@ def create_app(config_name=None):
 
     # Initialize extensions
     csrf_protect = CSRFProtect(flask_app)
-    compress = Compress(flask_app)
+    Compress(flask_app)  # Initialize compression without storing reference
 
     rate_limiter = Limiter(
         key_func=get_remote_address,
