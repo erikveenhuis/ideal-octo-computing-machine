@@ -50,6 +50,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load local GPX scripts
     const loadGPXScripts = async () => {
         const gpxScripts = [
+            '{{ url_for("static", filename="js/components/form-validator.js") }}',
+            '{{ url_for("static", filename="js/components/loading-states.js") }}',
             '{{ url_for("static", filename="js/gpx-config.js") }}',
             '{{ url_for("static", filename="js/gpx-utils.js") }}',
             '{{ url_for("static", filename="js/gpx-map-manager.js") }}',

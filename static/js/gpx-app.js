@@ -138,8 +138,8 @@ class GPXApp {
 
         // Show loading state
         const uploadForm = fileInput.closest('form') || fileInput.closest('.controls');
-        if (uploadForm) {
-            loadingStates.setFormLoading(uploadForm);
+        if (uploadForm && window.loadingStates) {
+            window.loadingStates.setFormLoading(uploadForm);
         }
 
         try {
@@ -166,8 +166,8 @@ class GPXApp {
             showToast('Error loading GPX file: ' + error.message, 'error');
         } finally {
             // Remove loading state
-            if (uploadForm) {
-                loadingStates.removeFormLoading(uploadForm);
+            if (uploadForm && window.loadingStates) {
+                window.loadingStates.removeFormLoading(uploadForm);
             }
         }
     }
@@ -252,7 +252,9 @@ class GPXApp {
         const saveBtn = document.getElementById('saveImageBtn');
         
         // Add loading state to save button
-        loadingStates.setButtonLoading(saveBtn, 'Exporting...');
+        if (window.loadingStates) {
+            window.loadingStates.setButtonLoading(saveBtn, 'Exporting...');
+        }
         
         try {
             if (!this.exportManager) {
@@ -266,7 +268,9 @@ class GPXApp {
             showToast('Export failed - please try again', 'error');
         } finally {
             // Remove loading state
-            loadingStates.removeButtonLoading(saveBtn);
+            if (window.loadingStates) {
+                window.loadingStates.removeButtonLoading(saveBtn);
+            }
         }
     }
 
