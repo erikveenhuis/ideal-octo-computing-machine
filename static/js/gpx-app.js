@@ -16,6 +16,9 @@ class GPXApp {
 
         // Initialize sharpness control
         this.initializeSharpnessControl();
+
+        // Initialize form validation
+        this.initializeFormValidation();
     }
 
     initializeSharpnessControl() {
@@ -28,6 +31,37 @@ class GPXApp {
         
         sharpnessSlider.value = initialSharpness;
         sharpnessValue.textContent = initialSharpness;
+    }
+
+    initializeFormValidation() {
+        // Initialize GPX upload form validation
+        const uploadForm = document.getElementById('uploadForm');
+        if (uploadForm && window.formValidator) {
+            const formId = formValidator.initForm(uploadForm, {
+                validateOnBlur: true,
+                validateOnInput: false,
+                showErrorMessages: true,
+                highlightErrors: true
+            });
+
+            // Add validation rules for GPX file input
+            formValidator.addFieldValidation(formId, 'gpxFile', [
+                'required',
+                {
+                    rule: 'fileType',
+                    params: ['.gpx', 'application/gpx+xml'],
+                    message: 'Please select a valid GPX file'
+                },
+                {
+                    rule: 'fileSize',
+                    params: [10 * 1024 * 1024], // 10MB limit
+                    message: 'File size must be less than 10MB'
+                }
+            ]);
+
+            // Store form ID for later use
+            this.uploadFormId = formId;
+        }
     }
 
     setupEventListeners() {

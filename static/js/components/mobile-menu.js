@@ -33,11 +33,13 @@ class MobileMenu {
         });
 
         // Close menu when screen size changes to desktop
-        window.addEventListener('resize', () => {
-            if (window.innerWidth >= 640 && this.isOpen) { // sm breakpoint
-                this.close();
-            }
-        });
+        if (window.breakpointManager) {
+            window.breakpointManager.addBreakpointListener('mobile-menu', (data) => {
+                if (data.isDesktop && this.isOpen) {
+                    this.close();
+                }
+            });
+        }
 
         // Handle menu item clicks
         this.setupMenuItemHandlers();

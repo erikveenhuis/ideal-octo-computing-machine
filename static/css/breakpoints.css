@@ -1,0 +1,203 @@
+/* ==========================================================================
+   Standardized Responsive Breakpoints
+   Based on Tailwind CSS breakpoint system for consistency
+   ========================================================================== */
+
+:root {
+    /* Breakpoint Values */
+    --breakpoint-sm: 640px;   /* Small devices (landscape phones) */
+    --breakpoint-md: 768px;   /* Medium devices (tablets) */
+    --breakpoint-lg: 1024px;  /* Large devices (desktops) */
+    --breakpoint-xl: 1280px;  /* Extra large devices (large desktops) */
+    --breakpoint-2xl: 1536px; /* 2X large devices (larger desktops) */
+    
+    /* Common Layout Values */
+    --container-padding: 1rem;
+    --sidebar-width: 320px;
+    --sidebar-width-collapsed: 60px;
+    --header-height: 4rem;
+    --mobile-menu-breakpoint: var(--breakpoint-lg);
+}
+
+/* ==========================================================================
+   Media Query Mixins (for reference in other CSS files)
+   ========================================================================== */
+
+/* Mobile First Approach */
+@media (min-width: 640px) {
+    :root {
+        --container-padding: 1.5rem;
+    }
+}
+
+@media (min-width: 768px) {
+    :root {
+        --container-padding: 2rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    :root {
+        --sidebar-width: 360px;
+    }
+}
+
+/* ==========================================================================
+   Standard Layout Classes
+   ========================================================================== */
+
+.container-responsive {
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding-left: var(--container-padding);
+    padding-right: var(--container-padding);
+}
+
+/* Standard Grid Systems */
+.grid-responsive-1-2 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .grid-responsive-1-2 {
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+    }
+}
+
+.grid-responsive-auto-fit {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .grid-responsive-auto-fit {
+        gap: 2rem;
+    }
+}
+
+/* Standard Navigation Patterns */
+.nav-desktop-only {
+    display: none;
+}
+
+@media (min-width: 640px) {
+    .nav-desktop-only {
+        display: flex;
+    }
+}
+
+.nav-mobile-only {
+    display: block;
+}
+
+@media (min-width: 640px) {
+    .nav-mobile-only {
+        display: none;
+    }
+}
+
+/* Sidebar Patterns */
+.sidebar-responsive {
+    width: 100%;
+    height: auto;
+    position: relative;
+}
+
+@media (min-width: 1024px) {
+    .sidebar-responsive {
+        width: var(--sidebar-width);
+        height: calc(100vh - var(--header-height));
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+    }
+}
+
+.main-content-responsive {
+    width: 100%;
+    min-height: calc(100vh - var(--header-height));
+}
+
+@media (min-width: 1024px) {
+    .main-content-responsive {
+        margin-left: var(--sidebar-width);
+        width: calc(100% - var(--sidebar-width));
+    }
+}
+
+/* ==========================================================================
+   Utility Classes
+   ========================================================================== */
+
+/* Show/Hide at different breakpoints */
+.hidden-mobile {
+    display: none;
+}
+
+@media (min-width: 640px) {
+    .hidden-mobile {
+        display: block;
+    }
+}
+
+.hidden-tablet {
+    display: block;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .hidden-tablet {
+        display: none;
+    }
+}
+
+.hidden-desktop {
+    display: block;
+}
+
+@media (min-width: 1024px) {
+    .hidden-desktop {
+        display: none;
+    }
+}
+
+/* Responsive text sizes */
+.text-responsive-xl {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+}
+
+@media (min-width: 768px) {
+    .text-responsive-xl {
+        font-size: 1.5rem;
+        line-height: 2rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .text-responsive-xl {
+        font-size: 1.875rem;
+        line-height: 2.25rem;
+    }
+}
+
+/* Responsive spacing */
+.spacing-responsive {
+    padding: 1rem;
+}
+
+@media (min-width: 768px) {
+    .spacing-responsive {
+        padding: 1.5rem;
+    }
+}
+
+@media (min-width: 1024px) {
+    .spacing-responsive {
+        padding: 2rem;
+    }
+} 

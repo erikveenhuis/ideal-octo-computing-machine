@@ -23,6 +23,7 @@
         }
     </script>
     <!-- External CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/breakpoints.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
     <!-- This library is used for high-quality image resizing. -->
     <script src="https://cdn.jsdelivr.net/npm/pica/dist/pica.min.js"></script>
@@ -139,7 +140,9 @@
     </main>
 
     <!-- Component JavaScript -->
+    <script src="{{ url_for('static', filename='js/components/breakpoint-manager.js') }}"></script>
     <script src="{{ url_for('static', filename='js/components/loading-states.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/components/form-validator.js') }}"></script>
     <script src="{{ url_for('static', filename='js/components/theme-manager.js') }}"></script>
     <script src="{{ url_for('static', filename='js/components/version-info.js') }}"></script>
     <script src="{{ url_for('static', filename='js/components/mobile-menu.js') }}"></script>
