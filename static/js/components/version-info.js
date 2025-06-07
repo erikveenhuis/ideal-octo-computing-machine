@@ -2,6 +2,7 @@
  * Version Info Component
  * Handles version information dropdown functionality
  */
+
 class VersionInfo {
     constructor() {
         this.versionToggle = document.getElementById('version-toggle');
@@ -117,9 +118,26 @@ class VersionInfo {
 }
 
 // Initialize version info when DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
-    window.versionInfo = new VersionInfo();
-});
+function initializeVersionInfo() {
+    // Ensure elements exist before initializing
+    const versionToggle = document.getElementById('version-toggle');
+    const versionDropdown = document.getElementById('version-dropdown');
+    
+    if (versionToggle && versionDropdown && !window.versionInfo) {
+        window.versionInfo = new VersionInfo();
+    }
+}
+
+// Multiple initialization strategies to handle different timing scenarios
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeVersionInfo);
+} else {
+    // DOM already loaded, try immediate initialization
+    initializeVersionInfo();
+}
+
+// Delayed fallback for async script loading
+setTimeout(initializeVersionInfo, 100);
 
 // Export for modules
 if (typeof module !== 'undefined' && module.exports) {

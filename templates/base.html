@@ -236,12 +236,20 @@
                 });
             };
             
-            // Load all scripts in parallel
-            Promise.all(scriptsToLoad.map(loadScript)).then(() => {
-                console.log('All component scripts loaded successfully');
-            }).catch(error => {
-                console.error('Error loading component scripts:', error);
+            // Load all scripts in parallel - but don't let one failure stop the others
+            scriptsToLoad.forEach(src => {
+                loadScript(src).catch(error => {
+                    console.error('Script loading failed:', src, error);
+                });
             });
+            
+            // Fallback initialization for version-info in case timing issues occur
+            setTimeout(() => {
+                const versionToggle = document.getElementById('version-toggle');
+                if (versionToggle && !window.versionInfo && typeof VersionInfo !== 'undefined') {
+                    window.versionInfo = new VersionInfo();
+                }
+            }, 1000);
         });
     </script>
 
