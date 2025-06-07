@@ -102,6 +102,12 @@ class GPXApp {
         const formData = new FormData();
         formData.append('gpx_file', fileInput.files[0]);
 
+        // Show loading state
+        const uploadForm = fileInput.closest('form') || fileInput.closest('.controls');
+        if (uploadForm) {
+            loadingStates.setFormLoading(uploadForm);
+        }
+
         try {
             const response = await fetch('/upload-gpx', {
                 method: 'POST',
@@ -124,6 +130,11 @@ class GPXApp {
 
         } catch (error) {
             showToast('Error loading GPX file: ' + error.message, 'error');
+        } finally {
+            // Remove loading state
+            if (uploadForm) {
+                loadingStates.removeFormLoading(uploadForm);
+            }
         }
     }
 
@@ -204,12 +215,25 @@ class GPXApp {
     }
 
     async handleSaveImage() {
-        if (!this.exportManager) {
-            // Lazy load the export manager
-            this.exportManager = new GPXExportManager(this.mapManager);
-        }
+        const saveBtn = document.getElementById('saveImageBtn');
         
-        await this.exportManager.saveAsImage();
+        // Add loading state to save button
+        loadingStates.setButtonLoading(saveBtn, 'Exporting...');
+        
+        try {
+            if (!this.exportManager) {
+                // Lazy load the export manager
+                this.exportManager = new GPXExportManager(this.mapManager);
+            }
+            
+            await this.exportManager.saveAsImage();
+        } catch (error) {
+            console.error('Error during image save:', error);
+            showToast('Export failed - please try again', 'error');
+        } finally {
+            // Remove loading state
+            loadingStates.removeButtonLoading(saveBtn);
+        }
     }
 
     handleSidebarToggle(button) {
