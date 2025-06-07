@@ -68,6 +68,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
+from flask_compress import Compress
 from PIL import Image  # Still needed for logging available decoders
 
 # Import our custom modules
@@ -93,6 +94,7 @@ def create_app(config_name=None):
 
     # Initialize extensions
     csrf_protect = CSRFProtect(flask_app)
+    compress = Compress(flask_app)
 
     rate_limiter = Limiter(
         key_func=get_remote_address,
