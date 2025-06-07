@@ -146,7 +146,10 @@ image_transform_service = ImageTransformService(
 gpx_processing_service = GPXProcessingService()
 
 # Initialize deployment service
-deployment_service = DeploymentService()
+deployment_service = DeploymentService(
+    wsgi_file_path=app.config.get('WSGI_FILE_PATH'),
+    venv_pip_path=app.config.get('VENV_PIP_PATH')
+)
 
 # Configure API tokens from config
 if not app.config['REPLICATE_API_TOKEN']:

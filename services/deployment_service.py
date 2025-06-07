@@ -177,16 +177,23 @@ class DeploymentService:
 
     def _get_pip_executable(self) -> str:
         """Determine the correct pip executable to use."""
-        # Check if virtual environment pip exists
-        if os.path.exists(self.venv_pip_path):
+        # Check if virtual environment pip path is provided and exists
+        if self.venv_pip_path and os.path.exists(self.venv_pip_path):
             return self.venv_pip_path
 
-        self._log_info(f"Virtual environment pip not found at {self.venv_pip_path}")
+        if self.venv_pip_path:
+            self._log_info(f"Virtual environment pip not found at {self.venv_pip_path}")
+        else:
+            self._log_info("No virtual environment pip path configured")
         self._log_info("Falling back to system pip")
         return 'pip'
 
     def _reload_application(self) -> None:
         """Reload the WSGI application."""
+        if not self.wsgi_file_path:
+            self._log_info("No WSGI file path configured, skipping application reload")
+            return
+            
         if not os.path.exists(self.wsgi_file_path):
             self._log_error(f"WSGI file not found at: {self.wsgi_file_path}")
             return
