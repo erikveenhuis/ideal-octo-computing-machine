@@ -72,6 +72,23 @@ class Config:
         'X-XSS-Protection': '1; mode=block',
     }
 
+    # Compression Settings
+    COMPRESS_MIMETYPES = [
+        'text/html',
+        'text/css',
+        'text/xml',
+        'application/json',
+        'application/javascript',
+        'application/xml+rss',
+        'application/atom+xml',
+        'image/svg+xml',
+        'text/javascript',
+        'text/plain',
+    ]
+    COMPRESS_LEVEL = 6  # Compression level (1-9, 6 is a good balance)
+    COMPRESS_MIN_SIZE = 500  # Only compress responses larger than 500 bytes
+    COMPRESS_ALGORITHM = 'gzip'  # Use gzip compression
+
     # Deployment Configuration
     WSGI_FILE_PATH = os.environ.get('WSGI_FILE_PATH')
     VENV_PIP_PATH = os.environ.get('VENV_PIP_PATH')
