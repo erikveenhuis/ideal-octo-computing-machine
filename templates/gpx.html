@@ -50,8 +50,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load local GPX scripts
     const loadGPXScripts = async () => {
         const gpxScripts = [
-            '{{ url_for("static", filename="js/components/form-validator.js") }}',
-            '{{ url_for("static", filename="js/components/loading-states.js") }}',
             '{{ url_for("static", filename="js/gpx-config.js") }}',
             '{{ url_for("static", filename="js/gpx-utils.js") }}',
             '{{ url_for("static", filename="js/gpx-map-manager.js") }}',
@@ -71,8 +69,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
     
-    // Load external dependencies and local scripts in parallel
-    Promise.all([loadExternalDeps(), loadGPXScripts()]).then(() => {
+    // Wait for base template components to be available
+    const waitForBaseComponents = () => {
+        return new Promise((resolve) => {
+            const checkComponents = () => {
+                if (typeof FormValidator !== 'undefined' && typeof LoadingStates !== 'undefined') {
+                    resolve();
+                } else {
+                    setTimeout(checkComponents, 100);
+                }
+            };
+            checkComponents();
+        });
+    };
+
+    // Load external dependencies and local scripts, then wait for base components
+    Promise.all([loadExternalDeps(), loadGPXScripts(), waitForBaseComponents()]).then(() => {
         // Initialize the GPX application with proper template variables
         const mapboxAccessToken = '{{ config.MAPBOX_ACCESS_TOKEN }}';
         const csrfToken = '{{ csrf_token() }}';
