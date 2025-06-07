@@ -5,6 +5,88 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{% endblock %}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗺️</text></svg>">
+    
+    <!-- Resource hints for external domains -->
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://api.mapbox.com">
+    
+    <!-- Critical CSS - Load synchronously -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/breakpoints.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    
+    <!-- Critical inline styles for initial render -->
+    <style>
+        /* Critical CSS for above-the-fold content - prevents layout shift */
+        .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; }
+        .duration-200 { transition-duration: 200ms; }
+        .min-h-screen { min-height: 100vh; }
+        .bg-gray-100 { background-color: rgb(243 244 246); }
+        .dark\:bg-gray-900:is(.dark *) { background-color: rgb(17 24 39); }
+        
+        /* Navigation critical styles */
+        .bg-white { background-color: rgb(255 255 255); }
+        .dark\:bg-gray-800:is(.dark *) { background-color: rgb(31 41 55); }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        .max-w-7xl { max-width: 80rem; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .flex { display: flex; }
+        .justify-between { justify-content: space-between; }
+        .items-center { align-items: center; }
+        .h-16 { height: 4rem; }
+        
+        /* Basic responsive utilities */
+        .hidden { display: none; }
+        .block { display: block; }
+    </style>
+    
+    <!-- Theme detection and toggle script - Critical, must be inline and synchronous -->
+    <script>
+        // Check for saved theme preference or use system preference
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+        } else {
+            document.documentElement.classList.remove('dark')
+        }
+        
+        // Theme toggle functionality - inline for immediate availability
+        document.addEventListener('DOMContentLoaded', function() {
+            const themeToggle = document.getElementById('theme-toggle');
+            const lightIcon = document.getElementById('theme-toggle-light-icon');
+            const darkIcon = document.getElementById('theme-toggle-dark-icon');
+            
+            // Function to update icon visibility
+            function updateThemeIcons() {
+                if (document.documentElement.classList.contains('dark')) {
+                    lightIcon?.classList.remove('hidden');
+                    darkIcon?.classList.add('hidden');
+                } else {
+                    lightIcon?.classList.add('hidden');
+                    darkIcon?.classList.remove('hidden');
+                }
+            }
+            
+            // Set initial icon state
+            updateThemeIcons();
+            
+            // Theme toggle click handler
+            if (themeToggle) {
+                themeToggle.addEventListener('click', function() {
+                    if (document.documentElement.classList.contains('dark')) {
+                        document.documentElement.classList.remove('dark');
+                        localStorage.theme = 'light';
+                    } else {
+                        document.documentElement.classList.add('dark');
+                        localStorage.theme = 'dark';
+                    }
+                    updateThemeIcons();
+                });
+            }
+        });
+    </script>
+    
+    <!-- Tailwind CSS - CDN for reliable theme support -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -14,19 +96,10 @@
             }
         }
     </script>
-    <script>
-        // Check for saved theme preference or use system preference
-        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-            document.documentElement.classList.add('dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-        }
-    </script>
-    <!-- External CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/breakpoints.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
-    <!-- This library is used for high-quality image resizing. -->
-    <script src="https://cdn.jsdelivr.net/npm/pica/dist/pica.min.js"></script>
+    
+    <!-- Resource Optimizer - Load early for performance benefits -->
+    <script src="{{ url_for('static', filename='js/resource-optimizer.js') }}"></script>
+    
     {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 min-h-screen transition-colors duration-200">
@@ -139,13 +212,38 @@
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Component JavaScript -->
-    <script src="{{ url_for('static', filename='js/components/breakpoint-manager.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/components/loading-states.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/components/form-validator.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/components/theme-manager.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/components/version-info.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/components/mobile-menu.js') }}"></script>
+    <!-- Component JavaScript - Load asynchronously after page render -->
+    <script>
+        // Load JavaScript components asynchronously after DOM content is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const scriptsToLoad = [
+                '{{ url_for("static", filename="js/components/breakpoint-manager.js") }}',
+                '{{ url_for("static", filename="js/components/loading-states.js") }}',
+                '{{ url_for("static", filename="js/components/form-validator.js") }}',
+                '{{ url_for("static", filename="js/components/version-info.js") }}',
+                '{{ url_for("static", filename="js/components/mobile-menu.js") }}',
+                '{{ url_for("static", filename="js/performance-monitor.js") }}'
+            ];
+            
+            // Load scripts in parallel but maintain execution order where needed
+            const loadScript = (src) => {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.onload = resolve;
+                    script.onerror = reject;
+                    document.head.appendChild(script);
+                });
+            };
+            
+            // Load all scripts in parallel
+            Promise.all(scriptsToLoad.map(loadScript)).then(() => {
+                console.log('All component scripts loaded successfully');
+            }).catch(error => {
+                console.error('Error loading component scripts:', error);
+            });
+        });
+    </script>
 
     {% block extra_scripts %}{% endblock %}
 </body>

@@ -3,8 +3,13 @@
 {% block title %}GPX Route Viewer{% endblock %}
 
 {% block extra_head %}
+<!-- Resource hints for Mapbox -->
+<link rel="preconnect" href="https://api.mapbox.com">
+<link rel="dns-prefetch" href="https://api.mapbox.com">
+
+<!-- Mapbox CSS - Load early but don't block render -->
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.css" rel="stylesheet" />
-<script src="https://cdn.jsdelivr.net/npm/pica@9.0.1/dist/pica.min.js"></script>
+
 {% include 'components/gpx_styles.html' %}
 {% endblock %}
 
@@ -18,20 +23,64 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.js"></script>
-<script src="{{ url_for('static', filename='js/gpx-config.js') }}"></script>
-<script src="{{ url_for('static', filename='js/gpx-utils.js') }}"></script>
-<script src="{{ url_for('static', filename='js/gpx-map-manager.js') }}"></script>
-<script src="{{ url_for('static', filename='js/gpx-export-manager.js') }}"></script>
-<script src="{{ url_for('static', filename='js/gpx-app.js') }}"></script>
 <script>
+// Load GPX-specific resources asynchronously
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize the GPX application with proper template variables
-    const mapboxAccessToken = '{{ config.MAPBOX_ACCESS_TOKEN }}';
-    const csrfToken = '{{ csrf_token() }}';
+    // Load external dependencies first
+    const loadExternalDeps = async () => {
+        // Load Mapbox GL JS
+        const mapboxScript = document.createElement('script');
+        mapboxScript.src = 'https://api.mapbox.com/mapbox-gl-js/v3.12.0/mapbox-gl.js';
+        
+        // Load Pica.js for image processing
+        const picaScript = document.createElement('script');
+        picaScript.src = 'https://cdn.jsdelivr.net/npm/pica@9.0.1/dist/pica.min.js';
+        
+        // Add both scripts to head
+        document.head.appendChild(mapboxScript);
+        document.head.appendChild(picaScript);
+        
+        // Wait for both to load
+        await Promise.all([
+            new Promise(resolve => mapboxScript.onload = resolve),
+            new Promise(resolve => picaScript.onload = resolve)
+        ]);
+    };
     
-    // Create the app instance
-    window.gpxApp = new GPXApp(mapboxAccessToken, csrfToken);
+    // Load local GPX scripts
+    const loadGPXScripts = async () => {
+        const gpxScripts = [
+            '{{ url_for("static", filename="js/gpx-config.js") }}',
+            '{{ url_for("static", filename="js/gpx-utils.js") }}',
+            '{{ url_for("static", filename="js/gpx-map-manager.js") }}',
+            '{{ url_for("static", filename="js/gpx-export-manager.js") }}',
+            '{{ url_for("static", filename="js/gpx-app.js") }}'
+        ];
+        
+        // Load scripts sequentially to maintain dependencies
+        for (const scriptSrc of gpxScripts) {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = scriptSrc;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+    };
+    
+    // Load external dependencies and local scripts in parallel
+    Promise.all([loadExternalDeps(), loadGPXScripts()]).then(() => {
+        // Initialize the GPX application with proper template variables
+        const mapboxAccessToken = '{{ config.MAPBOX_ACCESS_TOKEN }}';
+        const csrfToken = '{{ csrf_token() }}';
+        
+        // Create the app instance
+        window.gpxApp = new GPXApp(mapboxAccessToken, csrfToken);
+        console.log('GPX application initialized successfully');
+    }).catch(error => {
+        console.error('Error loading GPX resources:', error);
+    });
 });
 </script>
 {% endblock %} 
