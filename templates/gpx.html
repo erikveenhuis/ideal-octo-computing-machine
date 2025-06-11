@@ -53,6 +53,12 @@ document.addEventListener('DOMContentLoaded', function() {
             '{{ url_for("static", filename="js/gpx-config.js") }}',
             '{{ url_for("static", filename="js/gpx-utils.js") }}',
             '{{ url_for("static", filename="js/gpx-map-manager.js") }}',
+            // Export components (load before main export manager)
+            '{{ url_for("static", filename="js/components/export-utilities.js") }}',
+            '{{ url_for("static", filename="js/components/map-synchronizer.js") }}',
+            '{{ url_for("static", filename="js/components/image-exporter.js") }}',
+            '{{ url_for("static", filename="js/components/svg-exporter.js") }}',
+            '{{ url_for("static", filename="js/components/export-manager.js") }}',
             '{{ url_for("static", filename="js/gpx-export-manager.js") }}',
             '{{ url_for("static", filename="js/gpx-app.js") }}'
         ];

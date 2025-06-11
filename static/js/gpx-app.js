@@ -14,24 +14,11 @@ class GPXApp {
         // Set up event listeners
         this.setupEventListeners();
 
-        // Initialize sharpness control
-        this.initializeSharpnessControl();
-
         // Initialize form validation
         this.initializeFormValidation();
     }
 
-    initializeSharpnessControl() {
-        // Set initial sharpness value based on the default selected quality
-        const initialQuality = document.getElementById('exportQuality').value;
-        const initialSharpness = getSharpnessForQuality(initialQuality);
-        
-        const sharpnessSlider = document.getElementById('sharpnessSlider');
-        const sharpnessValue = document.getElementById('sharpnessValue');
-        
-        sharpnessSlider.value = initialSharpness;
-        sharpnessValue.textContent = initialSharpness;
-    }
+
 
     initializeFormValidation() {
         // Initialize GPX upload form validation
@@ -84,20 +71,7 @@ class GPXApp {
             this.mapManager.changeMapStyle(e.target.value);
         });
 
-        // Export quality change - update sharpness slider to reflect default for selected quality
-        document.getElementById('exportQuality').addEventListener('change', (e) => {
-            this.handleQualityChange(e.target.value);
-        });
 
-        // Sharpness slider
-        document.getElementById('sharpnessSlider').addEventListener('input', (e) => {
-            this.handleSharpnessChange(e.target.value);
-        });
-
-        // Reset sharpness button
-        document.getElementById('resetSharpness').addEventListener('click', () => {
-            this.handleSharpnessReset();
-        });
 
         // Toggle markers
         document.getElementById('toggleMarkers').addEventListener('click', (e) => {
@@ -109,9 +83,14 @@ class GPXApp {
             this.handleAntialiasingToggle(e.target);
         });
 
-        // Save image button
-        document.getElementById('saveImageBtn').addEventListener('click', () => {
-            this.handleSaveImage();
+        // Save PNG button
+        document.getElementById('savePNGBtn').addEventListener('click', () => {
+            this.handleSavePNG();
+        });
+
+        // Save SVG button
+        document.getElementById('saveSVGBtn').addEventListener('click', () => {
+            this.handleSaveSVG();
         });
 
         // Toggle sidebar on mobile
@@ -212,44 +191,10 @@ class GPXApp {
         this.mapManager.toggleAntialiasing(!isEnabled);
     }
 
-    handleQualityChange(selectedQuality) {
-        // Update sharpness slider to show the current value for the selected quality
-        const currentSharpness = getSharpnessForQuality(selectedQuality);
-        const sharpnessSlider = document.getElementById('sharpnessSlider');
-        const sharpnessValue = document.getElementById('sharpnessValue');
-        
-        sharpnessSlider.value = currentSharpness;
-        sharpnessValue.textContent = currentSharpness;
-    }
 
-    handleSharpnessChange(value) {
-        const selectedQuality = document.getElementById('exportQuality').value;
-        const numericValue = parseInt(value);
-        
-        // Update the current sharpness setting for the selected quality
-        setSharpnessForQuality(selectedQuality, numericValue);
-        
-        // Update the display value
-        document.getElementById('sharpnessValue').textContent = numericValue;
-    }
 
-    handleSharpnessReset() {
-        const selectedQuality = document.getElementById('exportQuality').value;
-        const defaultSharpness = defaultSharpnessSettings[selectedQuality];
-        
-        // Reset to default for current quality
-        setSharpnessForQuality(selectedQuality, defaultSharpness);
-        
-        // Update UI elements
-        const sharpnessSlider = document.getElementById('sharpnessSlider');
-        const sharpnessValue = document.getElementById('sharpnessValue');
-        
-        sharpnessSlider.value = defaultSharpness;
-        sharpnessValue.textContent = defaultSharpness;
-    }
-
-    async handleSaveImage() {
-        const saveBtn = document.getElementById('saveImageBtn');
+    async handleSavePNG() {
+        const saveBtn = document.getElementById('savePNGBtn');
         
         // Add loading state to save button
         if (window.loadingStates) {
@@ -262,10 +207,36 @@ class GPXApp {
                 this.exportManager = new GPXExportManager(this.mapManager);
             }
             
-            await this.exportManager.saveAsImage();
+            await this.exportManager.saveAsPNG();
         } catch (error) {
-            console.error('Error during image save:', error);
-            showToast('Export failed - please try again', 'error');
+            console.error('Error during PNG save:', error);
+            showToast('PNG export failed - please try again', 'error');
+        } finally {
+            // Remove loading state
+            if (window.loadingStates) {
+                window.loadingStates.removeButtonLoading(saveBtn);
+            }
+        }
+    }
+
+    async handleSaveSVG() {
+        const saveBtn = document.getElementById('saveSVGBtn');
+        
+        // Add loading state to save button
+        if (window.loadingStates) {
+            window.loadingStates.setButtonLoading(saveBtn, 'Creating SVG...');
+        }
+        
+        try {
+            if (!this.exportManager) {
+                // Lazy load the export manager
+                this.exportManager = new GPXExportManager(this.mapManager);
+            }
+            
+            await this.exportManager.saveAsSVG();
+        } catch (error) {
+            console.error('Error during SVG save:', error);
+            showToast('SVG export failed - please try again', 'error');
         } finally {
             // Remove loading state
             if (window.loadingStates) {
