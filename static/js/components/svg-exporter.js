@@ -119,23 +119,36 @@ class SVGExporter {
             if (currentMapStyle && currentMapStyle.layers) {
                 console.log('=== ORIGINAL STYLE ANALYSIS ===');
                 
-                // Find and analyze problematic layers that might cause gray areas
-                const problematicLayers = currentMapStyle.layers.filter(layer => {
+                // Find and analyze layers that need special handling
+                const specialLayers = currentMapStyle.layers.filter(layer => {
                     if (layer.type !== 'fill') return false;
                     
                     const paint = layer.paint || {};
                     const fillColor = paint['fill-color'];
+                    const fillPattern = paint['fill-pattern'];
                     const fillOpacity = paint['fill-opacity'];
                     
-                    // Look for potentially problematic layers
-                    return !fillColor || fillOpacity === 0 || 
+                    // Look for layers that need special handling
+                    return (!fillColor && !fillPattern) || 
+                           (fillPattern && !fillColor) ||
+                           (Array.isArray(fillOpacity) && fillOpacity[0] === 'interpolate') ||
+                           fillOpacity === 0 || 
                            (typeof fillColor === 'object' && fillColor !== null && 'a' in fillColor && fillColor.a === 0);
                 });
                 
-                if (problematicLayers.length > 0) {
-                    console.log(`Found ${problematicLayers.length} potentially problematic fill layers:`);
-                    problematicLayers.forEach(layer => {
-                        console.log(`  ⚠️ ${layer.id}: paint=`, JSON.stringify(layer.paint, null, 2));
+                if (specialLayers.length > 0) {
+                    console.log(`Processing ${specialLayers.length} layers with special handling:`);
+                    specialLayers.forEach(layer => {
+                        const paint = layer.paint || {};
+                        let status = '';
+                        if (paint['fill-pattern'] && !paint['fill-color']) {
+                            status = '🎨 Pattern converted to color';
+                        } else if (Array.isArray(paint['fill-opacity']) && paint['fill-opacity'][0] === 'interpolate') {
+                            status = '📏 Interpolation evaluated';
+                        } else {
+                            status = '⚠️ Transparent/missing';
+                        }
+                        console.log(`  ${status} ${layer.id}`);
                     });
                 }
                 
@@ -168,7 +181,7 @@ class SVGExporter {
             const backgroundColor = this.getBackgroundColor(map);
             
             // Create SVG document
-            const svgDocument = await this.createSVGFromFeatures(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor);
+            const svgDocument = await this.createSVGFromFeatures(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map);
             
             // Download the SVG
             ExportUtilities.downloadSVG(svgDocument);
@@ -313,7 +326,7 @@ class SVGExporter {
         return organized;
     }
 
-    async createSVGFromFeatures(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor) {
+    async createSVGFromFeatures(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map) {
         // Use the correct 8.5x11 inch print dimensions (850x1100)
         const width = 850;
         const height = 1100;
@@ -344,7 +357,7 @@ class SVGExporter {
                 svgContent += `  <g class="${layerName}-layer">\n`;
                 
                 for (const feature of features) {
-                    const svgElement = this.featureToSVG(feature, projection);
+                    const svgElement = this.featureToSVG(feature, projection, map);
                     if (svgElement) {
                         svgContent += `    ${svgElement}\n`;
                     }
@@ -403,7 +416,7 @@ class SVGExporter {
         };
     }
 
-    featureToSVG(feature, projection) {
+    featureToSVG(feature, projection, map) {
         const geometry = feature.geometry;
         const properties = feature.properties || {};
         const layer = feature.layer || {};
@@ -419,7 +432,7 @@ class SVGExporter {
                 return this.lineStringToSVG(geometry.coordinates, paint, projection, layerId);
             
             case 'Polygon':
-                return this.polygonToSVG(geometry.coordinates, paint, projection, layerId, sourceLayer);
+                return this.polygonToSVG(geometry.coordinates, paint, projection, layerId, sourceLayer, map);
             
             case 'Point':
                 return this.pointToSVG(geometry.coordinates, properties, paint, layout, projection);
@@ -457,7 +470,7 @@ class SVGExporter {
         return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
 
-    polygonToSVG(coordinates, paint, projection, layerId, sourceLayer) {
+    polygonToSVG(coordinates, paint, projection, layerId, sourceLayer, map) {
         // Handle exterior ring (first coordinate array)
         const exteriorRing = coordinates[0];
         const points = exteriorRing.map(coord => 
@@ -466,8 +479,29 @@ class SVGExporter {
         
         // Use only the actual paint properties from the style
         let fillColor = paint['fill-color'];
-        const fillOpacity = paint['fill-opacity'];
+        let fillOpacity = paint['fill-opacity'];
         let strokeColor = paint['fill-outline-color'];
+        
+        // Handle fill patterns - convert to a suitable color fallback
+        if (!fillColor && paint['fill-pattern']) {
+            // For fill patterns, use a neutral color based on the pattern name
+            const patternName = paint['fill-pattern'];
+            if (typeof patternName === 'string') {
+                if (patternName.includes('pedestrian')) {
+                    fillColor = '#f0f0f0'; // Light gray for pedestrian areas
+                } else if (patternName.includes('park') || patternName.includes('green')) {
+                    fillColor = '#e8f5e8'; // Light green for parks
+                } else {
+                    fillColor = '#f5f5f5'; // Default light gray for patterns
+                }
+            }
+        }
+        
+        // Evaluate interpolation expressions for opacity
+        if (Array.isArray(fillOpacity) && fillOpacity[0] === 'interpolate') {
+            const currentZoom = map.getZoom();
+            fillOpacity = ExportUtilities.evaluateExpression(fillOpacity, { zoom: currentZoom });
+        }
         
         // Handle nested paint objects where color is inside another fill-color property
         if (fillColor && typeof fillColor === 'object' && fillColor !== null && 'fill-color' in fillColor) {
@@ -514,7 +548,6 @@ class SVGExporter {
                 // Handle RGBA color objects
                 const cssColor = ExportUtilities.rgbaObjectToCSS(fillColor);
                 if (cssColor) {
-                    console.log(`  ✅ Converting RGBA ${layerId}: ${JSON.stringify(fillColor)} → ${cssColor}`);
                     polygonElement += ` fill="${cssColor}"`;
                 } else {
                     console.log(`  ❌ Failed to convert RGBA for ${layerId}, skipping`);
