@@ -9,20 +9,24 @@ class SVGExporter {
 
     async saveAsSVG() {
         try {
+            console.log('🚀 Starting SVG export...');
             showToast('🗺️ Analyzing visible map features for vector export...', 'success');
             
             const map = this.mapManager.getMap();
             await ExportUtilities.waitForMapReady(map);
+            console.log('✅ Map ready');
             
             // Get current map bounds and state with more precision
             const center = map.getCenter();
             const zoom = map.getZoom();
             const bearing = map.getBearing();
+            console.log('✅ Got map state');
             
             // Get the actual canvas dimensions for more accurate projection
             const mapCanvas = map.getCanvas();
             const canvasWidth = mapCanvas.width;
             const canvasHeight = mapCanvas.height;
+            console.log('✅ Got canvas dimensions');
             
             // Calculate precise bounds based on actual viewport
             const centerPixel = map.project(center);
@@ -37,6 +41,7 @@ class SVGExporter {
                 [topLeft.lng, bottomRight.lat], // Southwest
                 [bottomRight.lng, topLeft.lat]  // Northeast
             );
+            console.log('✅ Calculated bounds');
             
             console.log(`Original canvas: ${canvasWidth}x${canvasHeight}`);
             console.log(`Bounds: SW ${bounds.getSouthWest().lng.toFixed(6)}, ${bounds.getSouthWest().lat.toFixed(6)} - NE ${bounds.getNorthEast().lng.toFixed(6)}, ${bounds.getNorthEast().lat.toFixed(6)}`);
@@ -49,6 +54,7 @@ class SVGExporter {
             const allFeatures = map.queryRenderedFeatures(undefined, {
                 validate: false // Include all features, even if they fail validation
             });
+            console.log('✅ Queried features');
             
             // Enhanced feature filtering to prevent invisible features from appearing in SVG
             const currentZoom = zoom;
@@ -56,12 +62,38 @@ class SVGExporter {
                 const layer = feature.layer;
                 if (!layer) return false; // Skip features without layer info
                 
+                // Special tracking for Dutch islands
+                if (feature.properties?.name && 
+                    (feature.properties.name.toLowerCase().includes('eiland') || 
+                     feature.properties.name.toLowerCase().includes('noordereiland'))) {
+                    console.log(`🔍 FILTERING CHECK - Dutch island "${feature.properties.name}":`, {
+                        layerId: layer.id,
+                        sourceLayer: feature.sourceLayer,
+                        layerType: layer.type,
+                        minZoom: layer.minzoom,
+                        maxZoom: layer.maxzoom,
+                        currentZoom: currentZoom,
+                        visibility: layer.layout?.visibility,
+                        willBeFiltered: false // We'll update this
+                    });
+                }
+                
                 const minZoom = layer.minzoom || 0;
                 const maxZoom = layer.maxzoom || 24;
                 const visibility = layer.layout?.visibility;
                 
                 // Basic zoom and visibility checks
                 if (currentZoom < minZoom || currentZoom > maxZoom || visibility === 'none') {
+                    // Check if we're filtering out an island
+                    if (feature.properties?.name && 
+                        (feature.properties.name.toLowerCase().includes('eiland') || 
+                         feature.properties.name.toLowerCase().includes('noordereiland'))) {
+                        console.log(`❌ FILTERED OUT Dutch island "${feature.properties.name}" due to zoom/visibility:`, {
+                            reason: currentZoom < minZoom ? 'below minZoom' : 
+                                   currentZoom > maxZoom ? 'above maxZoom' : 'visibility none',
+                            minZoom, maxZoom, currentZoom, visibility
+                        });
+                    }
                     return false;
                 }
                 
@@ -111,8 +143,32 @@ class SVGExporter {
                 
                 return true;
             });
+            console.log('✅ Filtered features');
             
             console.log(`Features found - Rendered: ${allFeatures.length}, Filtered: ${filteredRenderedFeatures.length} (removed ${allFeatures.length - filteredRenderedFeatures.length} invisible features)`);
+            
+            // 🚨 CRITICAL DEBUG: Check filtered features immediately
+            console.log('🚨 IMMEDIATE FEATURE CHECK:');
+            console.log('  Filtered features type:', typeof filteredRenderedFeatures);
+            console.log('  Filtered features length:', filteredRenderedFeatures?.length);
+            console.log('  Filtered features is array:', Array.isArray(filteredRenderedFeatures));
+            
+            // Log first few features to see their structure
+            if (filteredRenderedFeatures && filteredRenderedFeatures.length > 0) {
+                console.log('  First 5 features:');
+                for (let i = 0; i < Math.min(5, filteredRenderedFeatures.length); i++) {
+                    const f = filteredRenderedFeatures[i];
+                    console.log(`    ${i+1}. ${f?.layer?.type} - ${f?.sourceLayer}/${f?.layer?.id}`);
+                    
+                    if (f?.layer?.type === 'line') {
+                        console.log(`      🔍 FOUND LINE FEATURE!`);
+                        console.log(`      Properties:`, f.properties);
+                        console.log(`      Paint:`, f.layer?.paint);
+                    }
+                }
+            } else {
+                console.log('  ❌ NO FILTERED FEATURES!');
+            }
             
             // Debug: Analyze original style layers
             const currentMapStyle = map.getStyle();
@@ -171,25 +227,48 @@ class SVGExporter {
                 console.log(`Total visible layers: ${visibleLayers.length}`);
                 console.log('=== END STYLE ANALYSIS ===');
             }
+            console.log('✅ Analyzed style');
             
             // Organize features by layer and type
-            const organizedFeatures = this.organizeFeatures(filteredRenderedFeatures);
+            console.log('🔄 Starting feature organization...');
+            console.log('🚨 PRE-ORGANIZE DEBUG:');
+            console.log('  filteredRenderedFeatures type:', typeof filteredRenderedFeatures);
+            console.log('  filteredRenderedFeatures length:', filteredRenderedFeatures?.length);
+            console.log('  filteredRenderedFeatures is array:', Array.isArray(filteredRenderedFeatures));
+            console.log('  About to call organizeFeatures...');
+            
+            let organizedFeatures;
+            try {
+                organizedFeatures = this.organizeFeatures(filteredRenderedFeatures, map);
+                console.log('✅ Organized features successfully');
+            } catch (organizeError) {
+                console.error('❌ Error in organizeFeatures:', organizeError);
+                console.error('Error stack:', organizeError.stack);
+                throw organizeError;
+            }
             
             showToast('🎨 Converting to SVG format...', 'success');
             
             // Get background color from the map style before creating SVG
+            console.log('🔄 Getting background color...');
             const backgroundColor = this.getBackgroundColor(map);
+            console.log('✅ Got background color');
             
             // Create SVG document
+            console.log('🔄 Creating SVG document...');
             const svgDocument = await this.createSVGFromFeatures(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map);
+            console.log('✅ Created SVG document');
             
             // Download the SVG
+            console.log('🔄 Downloading SVG...');
             ExportUtilities.downloadSVG(svgDocument);
+            console.log('✅ Downloaded SVG');
             
             showToast('✅ Vector export complete! Your map is now editable SVG format', 'success', 4000);
             
         } catch (error) {
-            console.error('Error during SVG export:', error);
+            console.error('❌ Error during SVG export:', error);
+            console.error('❌ Error stack:', error.stack);
             showToast('❌ SVG export failed - this feature requires complex vector processing', 'error', 5000);
         }
     }
@@ -245,7 +324,14 @@ class SVGExporter {
         return backgroundColor;
     }
 
-    organizeFeatures(features) {
+    organizeFeatures(features, map) {
+        // IMMEDIATE debugging at the start
+        console.log('🚨 ORGANIZE FEATURES DEBUG - START');
+        console.log('  Features parameter type:', typeof features);
+        console.log('  Features parameter length:', features?.length);
+        console.log('  Features is array:', Array.isArray(features));
+        console.log('  Map parameter type:', typeof map);
+        
         const organized = {
             background: [],
             water: [],
@@ -262,29 +348,76 @@ class SVGExporter {
 
         console.log('Organizing features by type and source...');
         const layerCounts = {};
+        const sourceLayerCounts = {};
+        const layerIdsBySource = {};
 
-        features.forEach(feature => {
+        // CRITICAL: Log all line features immediately as we process them
+        console.log('🚨 PROCESSING FEATURES - START');
+        let lineFeatureCount = 0;
+        
+        features.forEach((feature, index) => {
             const sourceLayer = feature.sourceLayer;
             const layerId = feature.layer?.id || 'unknown';
             const layerType = feature.layer?.type;
             
+            // Log every line feature immediately
+            if (layerType === 'line') {
+                lineFeatureCount++;
+                console.log(`🔍 LINE FEATURE ${lineFeatureCount}: ${sourceLayer}/${layerId}`);
+                console.log(`  Properties:`, feature.properties || {});
+                console.log(`  Paint:`, feature.layer?.paint || {});
+                
+                if ((layerId && layerId.includes('boundary')) || 
+                    (layerId && layerId.includes('coast')) || 
+                    (sourceLayer && sourceLayer.includes('boundary'))) {
+                    console.log(`  🌊 POTENTIAL ISLAND BOUNDARY!`);
+                }
+            }
+            
             // Count features by layer for debugging
             layerCounts[layerId] = (layerCounts[layerId] || 0) + 1;
             
+            // Track source layers and their associated layer IDs
+            if (sourceLayer) {
+                sourceLayerCounts[sourceLayer] = (sourceLayerCounts[sourceLayer] || 0) + 1;
+                if (!layerIdsBySource[sourceLayer]) {
+                    layerIdsBySource[sourceLayer] = new Set();
+                }
+                layerIdsBySource[sourceLayer].add(layerId);
+            }
+            
             // Use exact Mapbox layer names for more accurate categorization
-            if (layerId.includes('route') || feature.source === 'route') {
+            if ((layerId && layerId.includes('route')) || feature.source === 'route') {
                 organized.route.push(feature);
-            } else if (layerId.includes('marker') || feature.source === 'markers') {
+            } else if ((layerId && layerId.includes('marker')) || feature.source === 'markers') {
                 organized.markers.push(feature);
-            } else if (sourceLayer === 'water' || sourceLayer === 'waterway' || layerId.includes('water') || layerId.includes('waterway')) {
+            } else if (sourceLayer === 'water' || sourceLayer === 'waterway' || (layerId && layerId.includes('water')) || (layerId && layerId.includes('waterway'))) {
                 organized.water.push(feature);
-            } else if (sourceLayer === 'road' || layerId.includes('road') || layerId.includes('street') || layerId.includes('highway')) {
+                
+                // Debug water features that might actually be islands (some map styles have complex water/land relationships)
+                if (feature.properties) {
+                    const props = feature.properties;
+                    console.log(`💧 WATER FEATURE:`, {
+                        layerId: layerId,
+                        sourceLayer: sourceLayer,
+                        class: props.class,
+                        type: props.type,
+                        intermittent: props.intermittent,
+                        geometryType: feature.geometry?.type
+                    });
+                    
+                    // Check if this water feature might actually represent land/islands
+                    if (props.class === 'ice' || props.type === 'ice' || (layerId && layerId.includes('ice'))) {
+                        console.log(`❄️ ICE/LAND FEATURE in water layer: ${layerId}`, props);
+                    }
+                }
+            } else if (sourceLayer === 'road' || (layerId && layerId.includes('road')) || (layerId && layerId.includes('street')) || (layerId && layerId.includes('highway'))) {
                 organized.roads.push(feature);
-            } else if (sourceLayer?.includes('rail') || layerId.includes('rail') || layerId.includes('transit')) {
+            } else if (sourceLayer?.includes('rail') || (layerId && layerId.includes('rail')) || (layerId && layerId.includes('transit'))) {
                 organized.railways.push(feature);
-            } else if (sourceLayer === 'building' || layerId.includes('building')) {
+            } else if (sourceLayer === 'building' || (layerId && layerId.includes('building'))) {
                 organized.buildings.push(feature);
-            } else if (sourceLayer === 'landuse' || sourceLayer === 'landuse_overlay' || layerId.includes('landuse')) {
+            } else if (sourceLayer === 'landuse' || sourceLayer === 'landuse_overlay' || (layerId && layerId.includes('landuse'))) {
                 organized.landuse.push(feature);
                 // Debug first few landuse features
                 if (organized.landuse.length <= 3) {
@@ -296,32 +429,348 @@ class SVGExporter {
                     });
                     console.log(`  Paint details:`, JSON.stringify(feature.layer?.paint, null, 2));
                 }
-            } else if (sourceLayer === 'landcover' || layerId.includes('landcover')) {
+            } else if (sourceLayer === 'landcover' || (layerId && layerId.includes('landcover'))) {
                 // Landcover includes islands, forests, and other terrain - put in landuse for proper layering
                 organized.landuse.push(feature);
-                // Debug first few landcover features
-                if (organized.landuse.length <= 3) {
-                    console.log(`🌳 LANDCOVER FEATURE:`, {
-                        layerId: layerId,
-                        sourceLayer: sourceLayer,
-                        layerVisibility: feature.layer?.layout?.visibility,
-                        properties: feature.properties
-                    });
-                    console.log(`  Paint details:`, JSON.stringify(feature.layer?.paint, null, 2));
+                // Debug landcover features to track islands
+                console.log(`🌳 LANDCOVER FEATURE ${organized.landuse.length}:`, {
+                    layerId: layerId,
+                    sourceLayer: sourceLayer,
+                    layerVisibility: feature.layer?.layout?.visibility,
+                    layerType: feature.layer?.type,
+                    geometryType: feature.geometry?.type,
+                    properties: feature.properties,
+                    hasCoordinates: !!feature.geometry?.coordinates,
+                    coordinateCount: feature.geometry?.coordinates?.length
+                });
+                console.log(`  Paint details:`, JSON.stringify(feature.layer?.paint, null, 2));
+                
+                // Additional debug for potential island features
+                if (feature.properties) {
+                    const props = feature.properties;
+                    if (props.class === 'ice' || props.type === 'island' || props.natural === 'island' || 
+                        (layerId && layerId.includes('island')) || (props.subclass && props.subclass.includes('island'))) {
+                        console.log(`🏝️ ISLAND DETECTED in landcover:`, {
+                            layerId: layerId,
+                            class: props.class,
+                            type: props.type,
+                            natural: props.natural,
+                            subclass: props.subclass,
+                            name: props.name
+                        });
+                    }
                 }
-            } else if (sourceLayer?.includes('admin') || layerId.includes('boundary') || layerId.includes('admin')) {
+            } else if (sourceLayer?.includes('admin') || (layerId && layerId.includes('boundary')) || (layerId && layerId.includes('admin'))) {
                 organized.boundaries.push(feature);
-            } else if (sourceLayer === 'place_label' || sourceLayer === 'natural_label' || layerType === 'symbol' || layerId.includes('label') || layerId.includes('text') || layerId.includes('place')) {
+            } else if (sourceLayer === 'place_label' || sourceLayer === 'natural_label' || layerType === 'symbol' || (layerId && layerId.includes('label')) || (layerId && layerId.includes('text')) || (layerId && layerId.includes('place'))) {
                 organized.labels.push(feature);
-            } else if (layerType === 'background' || layerId.includes('background')) {
+            } else if (layerType === 'background' || (layerId && layerId.includes('background'))) {
                 organized.background.push(feature);
             } else {
                 organized.other.push(feature);
+            }
+            
+            // General island detection across all feature types
+            if (feature.properties) {
+                const props = feature.properties;
+                const hasIslandProperty = props.class === 'ice' || props.type === 'island' || props.natural === 'island' || 
+                                         props.landuse === 'island' || props.place === 'island' ||
+                                         (props.subclass && props.subclass.includes('island')) ||
+                                         (props.name && props.name.toLowerCase().includes('island')) ||
+                                         (layerId && layerId.includes('island'));
+                
+                if (hasIslandProperty && sourceLayer !== 'landcover') {
+                    console.log(`🏝️ ISLAND FOUND in ${sourceLayer || 'unknown'} source:`, {
+                        layerId: layerId,
+                        sourceLayer: sourceLayer,
+                        organizedAs: sourceLayer === 'water' ? 'water' : 
+                                   sourceLayer === 'landuse' ? 'landuse' : 'other',
+                        properties: props,
+                        geometryType: feature.geometry?.type
+                    });
+                }
             }
         });
 
         // Log feature counts for debugging
         console.log('Organized feature counts:', Object.entries(organized).map(([key, value]) => `${key}: ${value.length}`).join(', '));
+
+        // Comprehensive debugging - show all source layers and their layer IDs
+        console.log('=== COMPREHENSIVE SOURCE LAYER ANALYSIS ===');
+        console.log('Source layer counts:', sourceLayerCounts);
+        console.log('Layer IDs by source layer:');
+        Object.entries(layerIdsBySource).forEach(([sourceLayer, layerIds]) => {
+            console.log(`  ${sourceLayer}: [${Array.from(layerIds).join(', ')}]`);
+        });
+        
+        // Check for landcover availability and zoom level recommendations
+        const currentZoom = map.getZoom();
+        if (!sourceLayerCounts.landcover) {
+            console.log(`⚠️ LANDCOVER ANALYSIS:`);
+            console.log(`  No 'landcover' source layer found at zoom ${currentZoom.toFixed(1)}`);
+            console.log(`  Islands are typically in the 'landcover' source layer`);
+            if (currentZoom < 9) {
+                console.log(`  🔍 RECOMMENDATION: Zoom in to level 10-12 to see detailed landcover data including islands`);
+                console.log(`  📍 Try focusing on areas like: Wadden Sea, Zeeland, or IJsselmeer`);
+            } else {
+                console.log(`  This map style may not include landcover data, or islands are in a different source layer`);
+                console.log(`  🔍 SEARCHING FOR ISLANDS IN OTHER SOURCE LAYERS...`);
+            }
+        } else {
+            console.log(`✅ Landcover source layer found with ${sourceLayerCounts.landcover} features`);
+        }
+        
+        // Enhanced search for major Dutch islands in ALL source layers
+        console.log(`🔍 SEARCHING FOR MAJOR DUTCH ISLANDS at zoom ${currentZoom.toFixed(1)}:`);
+        const majorIslands = ['texel', 'vlieland', 'terschelling', 'ameland', 'schiermonnikoog', 'marken', 'urk', 'noordereiland'];
+        let islandFeaturesFound = 0;
+        let coastlineFeatures = 0;
+        let lineFeatures = 0;
+        
+        features.forEach(feature => {
+            // Count line features
+            if (feature.layer?.type === 'line') {
+                lineFeatures++;
+                
+                // Check for coastline-related features
+                const layerId = feature.layer?.id || '';
+                const sourceLayer = feature.sourceLayer || '';
+                if ((layerId && layerId.includes('coast')) || (sourceLayer && sourceLayer.includes('coast')) || 
+                    (layerId && layerId.includes('shore')) || (layerId && layerId.includes('water-line')) ||
+                    (feature.properties?.natural === 'coastline') ||
+                    (feature.properties?.class === 'coastline')) {
+                    coastlineFeatures++;
+                    console.log(`🌊 COASTLINE FEATURE: ${sourceLayer}/${layerId}`, {
+                        properties: feature.properties,
+                        geometryType: feature.geometry?.type,
+                        minZoom: feature.layer?.minzoom,
+                        maxZoom: feature.layer?.maxZoom,
+                        paint: feature.layer?.paint
+                    });
+                }
+            }
+            
+            if (feature.properties?.name) {
+                const name = feature.properties.name.toLowerCase();
+                const hasIslandName = majorIslands.some(island => name.includes(island)) || name.includes('eiland');
+                
+                if (hasIslandName) {
+                    islandFeaturesFound++;
+                    console.log(`🏝️ ISLAND FOUND: "${feature.properties.name}" in ${feature.sourceLayer}/${feature.layer?.id}`, {
+                        sourceLayer: feature.sourceLayer,
+                        layerId: feature.layer?.id,
+                        layerType: feature.layer?.type,
+                        properties: feature.properties,
+                        geometryType: feature.geometry?.type,
+                        minZoom: feature.layer?.minzoom,
+                        maxZoom: feature.layer?.maxzoom,
+                        isVisible: currentZoom >= (feature.layer?.minzoom || 0) && currentZoom <= (feature.layer?.maxzoom || 24)
+                    });
+                }
+            }
+        });
+        
+        console.log(`📊 LINE FEATURE ANALYSIS:`);
+        console.log(`  Total line features: ${lineFeatures}`);
+        console.log(`  Coastline features: ${coastlineFeatures}`);
+        
+        // List all line layer IDs to identify what's appearing at higher zoom
+        const lineLayerCounts = {};
+        const fillLayerCounts = {};
+        const allLayerCounts = {};
+        
+        console.log(`🔍 PROCESSING ${features.length} FEATURES...`);
+        features.forEach((feature, index) => {
+            const layerType = feature.layer?.type;
+            const layerId = feature.layer?.id || 'unknown';
+            const sourceLayer = feature.sourceLayer || 'unknown';
+            
+            // Track all layers
+            const fullLayerKey = `${sourceLayer}/${layerId} (${layerType})`;
+            allLayerCounts[fullLayerKey] = (allLayerCounts[fullLayerKey] || 0) + 1;
+            
+            // Log EVERY feature immediately for debugging
+            console.log(`Feature ${index}: ${fullLayerKey}`, {
+                props: feature.properties,
+                geomType: feature.geometry?.type
+            });
+            
+            if (layerType === 'line') {
+                lineLayerCounts[layerId] = (lineLayerCounts[layerId] || 0) + 1;
+            } else if (layerType === 'fill') {
+                fillLayerCounts[layerId] = (fillLayerCounts[layerId] || 0) + 1;
+            }
+        });
+        
+        console.log(`🔍 ALL LAYERS at zoom ${currentZoom.toFixed(1)}:`);
+        if (Object.keys(allLayerCounts).length === 0) {
+            console.log(`  No layers found`);
+        } else {
+            Object.entries(allLayerCounts).forEach(([layerKey, count]) => {
+                console.log(`  ${layerKey}: ${count} features`);
+            });
+        }
+        
+        console.log(`🔍 LINE LAYERS DETAILED:`);
+        if (Object.keys(lineLayerCounts).length === 0) {
+            console.log(`  No line layers found`);
+        } else {
+            Object.entries(lineLayerCounts).forEach(([layerId, count]) => {
+                console.log(`  ${layerId}: ${count} features`);
+            });
+        }
+        
+        console.log(`🔍 FILL LAYERS DETAILED:`);
+        if (Object.keys(fillLayerCounts).length === 0) {
+            console.log(`  No fill layers found`);
+        } else {
+            Object.entries(fillLayerCounts).forEach(([layerId, count]) => {
+                console.log(`  ${layerId}: ${count} features`);
+            });
+        }
+        
+        // ALWAYS analyze features to understand the zoom level differences
+        console.log(`🔍 DEBUG: Starting line feature analysis at zoom ${currentZoom.toFixed(1)}`);
+        console.log(`  Features array type:`, typeof features);
+        console.log(`  Features array length:`, features?.length);
+        console.log(`  Features array is array:`, Array.isArray(features));
+        
+        if (!features || features.length === 0) {
+            console.log(`  ❌ FEATURES ARRAY IS EMPTY OR NULL!`);
+        } else {
+            console.log(`  ✅ Starting analysis of ${features.length} features...`);
+            
+            // Count ALL features and log every single one briefly
+            let count = 0;
+            let lineCount = 0;
+            for (const feature of features) {
+                count++;
+                const type = feature?.layer?.type || 'UNKNOWN';
+                const id = feature?.layer?.id || 'NO_ID';
+                const source = feature?.sourceLayer || 'NO_SOURCE';
+                
+                console.log(`  ${count}. ${type} - ${source}/${id}`);
+                
+                // If it's a line, give more details
+                if (type === 'line') {
+                    lineCount++;
+                    console.log(`    🔍 LINE FEATURE ${lineCount} DETAILS:`);
+                    console.log(`      Properties:`, feature.properties || {});
+                    console.log(`      Paint:`, feature.layer?.paint || {});
+                    
+                    if (id.includes('boundary') || id.includes('coast') || source.includes('boundary')) {
+                        console.log(`      🌊 POTENTIAL ISLAND BOUNDARY!`);
+                    }
+                }
+            }
+            
+            console.log(`  ✅ Finished analyzing ${count} features (${lineCount} line features found)`);
+        }
+
+        if (islandFeaturesFound === 0) {
+            console.log(`  ❌ No major Dutch islands found in any source layer at zoom ${currentZoom.toFixed(1)}`);
+        } else {
+            console.log(`  ✅ Found ${islandFeaturesFound} island features`);
+        }
+        
+        // Show the most common layer IDs
+        const sortedLayerCounts = Object.entries(layerCounts).sort((a, b) => b[1] - a[1]);
+        console.log('Top layer IDs by feature count:');
+        sortedLayerCounts.slice(0, 10).forEach(([layerId, count]) => {
+            console.log(`  ${layerId}: ${count} features`);
+        });
+        
+        // Track total features by source layer for zoom level comparison
+        console.log(`📊 FEATURE SUMMARY at zoom ${currentZoom.toFixed(1)}:`);
+        console.log(`  Total features: ${features.length}`);
+        Object.entries(sourceLayerCounts).forEach(([sourceLayer, count]) => {
+            console.log(`  ${sourceLayer}: ${count} features`);
+        });
+        
+        // Check for any layers that might contain land/island data
+        console.log('🔍 ANALYZING ALL LAYERS FOR POTENTIAL ISLAND DATA:');
+        Object.entries(sourceLayerCounts).forEach(([sourceLayer, count]) => {
+            if (sourceLayer === 'landuse' || sourceLayer === 'landcover' || 
+                sourceLayer.includes('land') || sourceLayer.includes('island') ||
+                sourceLayer === 'natural' || sourceLayer === 'place') {
+                console.log(`  🌍 ${sourceLayer}: ${count} features (potential island container)`);
+            }
+        });
+        
+        try {
+            // Look for land-related properties in features
+            let landFeatureCount = 0;
+            let landuseFeaturesChecked = 0;
+            
+            features.forEach(feature => {
+                try {
+                    if (feature.properties) {
+                        const props = feature.properties;
+                        const sourceLayer = feature.sourceLayer;
+                        const layerId = feature.layer?.id;
+                        
+                        // Check all landuse features for potential island properties
+                        if (sourceLayer === 'landuse') {
+                            landuseFeaturesChecked++;
+                            console.log(`  🏞️ Landuse feature ${landuseFeaturesChecked}: ${layerId}`, {
+                                class: props.class,
+                                type: props.type,
+                                subclass: props.subclass,
+                                natural: props.natural,
+                                name: props.name,
+                                landuse: props.landuse,
+                                place: props.place,
+                                allProps: Object.keys(props)
+                            });
+                        }
+                        
+                        // Check for any land/island-related properties
+                        const hasLandProperty = props.class === 'ice' || props.type === 'island' || 
+                                               props.natural === 'island' || props.landuse === 'island' || 
+                                               props.place === 'island' || props.natural === 'coastline' ||
+                                               props.class === 'land' || props.type === 'land' ||
+                                               (props.name && props.name.toLowerCase().includes('island')) ||
+                                               (props.name && props.name.toLowerCase().includes('eiland')) ||
+                                               (props.subclass && (props.subclass.includes('island') || props.subclass.includes('land')));
+                                               
+                        // Specific detection for Noordereiland and other Dutch islands
+                        if (props.name && (props.name.toLowerCase().includes('eiland') || 
+                                          props.name.toLowerCase().includes('noordereiland'))) {
+                            console.log(`🏝️ DUTCH ISLAND DETECTED: "${props.name}" in ${sourceLayer}/${layerId}`, {
+                                fullFeature: feature,
+                                allProperties: props,
+                                geometryType: feature.geometry?.type,
+                                coordinates: feature.geometry?.coordinates ? 'present' : 'missing',
+                                layer: feature.layer
+                            });
+                        }
+                                       
+                        if (hasLandProperty) {
+                            landFeatureCount++;
+                            console.log(`  🏖️ Land/island feature found: ${sourceLayer}/${layerId}`, {
+                                class: props.class,
+                                type: props.type,
+                                natural: props.natural,
+                                name: props.name,
+                                landuse: props.landuse,
+                                place: props.place,
+                                subclass: props.subclass
+                            });
+                        }
+                    }
+                } catch (featureError) {
+                    console.warn('Error processing feature for land detection:', featureError);
+                }
+            });
+            
+            if (landFeatureCount === 0) {
+                console.log('  ℹ️ No obvious island/land features detected in available features');
+            }
+        } catch (debugError) {
+            console.warn('Error in land feature detection:', debugError);
+        }
+        
+        console.log('=== END COMPREHENSIVE ANALYSIS ===');
 
         return organized;
     }
@@ -477,6 +926,29 @@ class SVGExporter {
             `${projection.lngToX(coord[0]).toFixed(2)},${projection.latToY(coord[1]).toFixed(2)}`
         ).join(' ');
         
+        // Special logging for landuse features (potential islands)
+        if (sourceLayer === 'landuse') {
+            console.log(`🏖️ CONVERTING LANDUSE POLYGON: ${sourceLayer}/${layerId}`, {
+                paint: JSON.stringify(paint, null, 2),
+                coordinateCount: exteriorRing.length,
+                boundsCheck: {
+                    minX: Math.min(...exteriorRing.map(c => projection.lngToX(c[0]))),
+                    maxX: Math.max(...exteriorRing.map(c => projection.lngToX(c[0]))),
+                    minY: Math.min(...exteriorRing.map(c => projection.latToY(c[1]))),
+                    maxY: Math.max(...exteriorRing.map(c => projection.latToY(c[1])))
+                }
+            });
+        }
+        
+        // Special logging for Dutch islands
+        if (layerId && (layerId.toLowerCase().includes('eiland') || layerId.toLowerCase().includes('noordereiland'))) {
+            console.log(`🏝️ CONVERTING Dutch island polygon: ${layerId}`, {
+                sourceLayer, 
+                paint: JSON.stringify(paint, null, 2),
+                coordinateCount: exteriorRing.length
+            });
+        }
+        
         // Use only the actual paint properties from the style
         let fillColor = paint['fill-color'];
         let fillOpacity = paint['fill-opacity'];
@@ -497,10 +969,31 @@ class SVGExporter {
             }
         }
         
+        // Evaluate complex expressions for fill color
+        if (fillColor && (Array.isArray(fillColor) || (typeof fillColor === 'object' && fillColor !== null && !('r' in fillColor)))) {
+            try {
+                const currentZoom = map.getZoom();
+                const evaluatedColor = ExportUtilities.evaluateExpression(fillColor, { zoom: currentZoom });
+                if (evaluatedColor && evaluatedColor !== fillColor) {
+                    fillColor = evaluatedColor;
+                    console.log(`✅ Evaluated complex fill color for ${layerId}: ${fillColor}`);
+                }
+            } catch (expressionError) {
+                console.warn(`⚠️ Failed to evaluate fill color expression for ${layerId}:`, expressionError);
+                console.warn(`Expression was:`, fillColor);
+                // Keep the original fillColor value and let the fallback logic handle it
+            }
+        }
+        
         // Evaluate interpolation expressions for opacity
         if (Array.isArray(fillOpacity) && fillOpacity[0] === 'interpolate') {
-            const currentZoom = map.getZoom();
-            fillOpacity = ExportUtilities.evaluateExpression(fillOpacity, { zoom: currentZoom });
+            try {
+                const currentZoom = map.getZoom();
+                fillOpacity = ExportUtilities.evaluateExpression(fillOpacity, { zoom: currentZoom });
+            } catch (opacityError) {
+                console.warn(`⚠️ Failed to evaluate fill opacity expression for ${layerId}:`, opacityError);
+                fillOpacity = 1; // Default opacity
+            }
         }
         
         // Handle nested paint objects where color is inside another fill-color property
@@ -512,7 +1005,27 @@ class SVGExporter {
             strokeColor = strokeColor['fill-outline-color'];
         }
         
-        // Enhanced transparency and visibility checks to prevent gray areas
+        // Provide fallback colors for important landcover features to prevent islands from being skipped
+        if (!fillColor && sourceLayer === 'landcover') {
+            // Provide reasonable fallback colors for different landcover types
+            if ((layerId && layerId.includes('grass')) || (layerId && layerId.includes('park'))) {
+                fillColor = '#e8f5e8'; // Light green
+            } else if ((layerId && layerId.includes('forest')) || (layerId && layerId.includes('wood'))) {
+                fillColor = '#d4e6d4'; // Forest green
+            } else if ((layerId && layerId.includes('scrub')) || (layerId && layerId.includes('bush'))) {
+                fillColor = '#e8f0e8'; // Light scrub color
+            } else if ((layerId && layerId.includes('sand')) || (layerId && layerId.includes('beach'))) {
+                fillColor = '#f5f1e8'; // Sandy color
+            } else if ((layerId && layerId.includes('rock')) || (layerId && layerId.includes('bare'))) {
+                fillColor = '#e8e8e8'; // Gray for rocky areas
+            } else {
+                // Default landcover color - this catches islands and other features
+                fillColor = '#f8f8f0'; // Very light beige for general landcover
+                console.log(`🏝️ Using default landcover color for ${layerId} (likely island or terrain feature)`);
+            }
+        }
+        
+        // Enhanced transparency and visibility checks - but less aggressive for landcover
         
         // Skip if completely transparent (fillOpacity is 0)
         if (fillOpacity === 0) {
@@ -526,16 +1039,25 @@ class SVGExporter {
             return null;
         }
         
-        // Skip if no fill color and no stroke (would render with browser default gray)
-        if (!fillColor && !strokeColor) {
-            console.log(`⚠️ Skipping polygon with no fill or stroke: ${layerId || sourceLayer}`);
-            return null;
-        }
-        
-        // Skip if only fillOpacity is defined but no fillColor (would use browser default)
-        if (!fillColor && !strokeColor && fillOpacity !== undefined) {
-            console.log(`⚠️ Skipping polygon with only opacity but no color: ${layerId || sourceLayer}`);
-            return null;
+        // For landcover features (including islands), be more permissive
+        if (sourceLayer === 'landcover' || (layerId && layerId.includes('landcover'))) {
+            if (!fillColor && !strokeColor) {
+                // Even if no explicit color, render landcover with a subtle default
+                fillColor = '#f8f8f0'; // Very light background color
+                console.log(`🏝️ Applying emergency fallback color for landcover feature: ${layerId}`);
+            }
+        } else {
+            // For non-landcover features, keep the original strict checks
+            if (!fillColor && !strokeColor) {
+                console.log(`⚠️ Skipping polygon with no fill or stroke: ${layerId || sourceLayer}`);
+                return null;
+            }
+            
+            // Skip if only fillOpacity is defined but no fillColor (would use browser default)
+            if (!fillColor && !strokeColor && fillOpacity !== undefined) {
+                console.log(`⚠️ Skipping polygon with only opacity but no color: ${layerId || sourceLayer}`);
+                return null;
+            }
         }
         
         let polygonElement = `<polygon points="${points}"`;
@@ -550,19 +1072,19 @@ class SVGExporter {
                 if (cssColor) {
                     polygonElement += ` fill="${cssColor}"`;
                 } else {
-                    console.log(`  ❌ Failed to convert RGBA for ${layerId}, skipping`);
-                    return null;
+                    console.log(`  ❌ Failed to convert RGBA for ${layerId}, using fallback`);
+                    polygonElement += ` fill="#f8f8f0"`;  // Fallback instead of skipping
                 }
             } else {
-                // Debug unknown color format and skip
-                console.log(`  ❌ Unknown color format in ${layerId}:`, {
+                // Debug unknown color format but don't skip - use fallback
+                console.log(`  ⚠️ Unknown color format in ${layerId}, using fallback:`, {
                     type: typeof fillColor,
                     value: fillColor,
                     stringified: JSON.stringify(fillColor),
                     constructor: fillColor?.constructor?.name,
                     sourceLayer: sourceLayer
                 });
-                return null;
+                polygonElement += ` fill="#f8f8f0"`;  // Fallback instead of skipping
             }
         } else {
             // No fill color - set to transparent to avoid browser default
@@ -588,13 +1110,18 @@ class SVGExporter {
                 }
             } else {
                 // Skip features with complex stroke expressions
-                console.log(`  ❌ Skipping feature with complex stroke expression: ${layerId}`);
+                console.log(`  ❌ Skipping complex stroke expression for: ${layerId}`);
             }
         } else {
             polygonElement += ` stroke="none"`;
         }
         
         polygonElement += `/>`;
+        
+        // Log the final SVG for landuse features
+        if (sourceLayer === 'landuse') {
+            console.log(`🏖️ FINAL LANDUSE SVG:`, polygonElement);
+        }
         
         return polygonElement;
     }

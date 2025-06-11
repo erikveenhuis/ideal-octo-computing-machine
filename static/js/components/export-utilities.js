@@ -108,18 +108,127 @@ class ExportUtilities {
     }
 
     static evaluateExpression(expression, properties) {
-        // Simple expression evaluator for Mapbox expressions
+        // Enhanced expression evaluator for Mapbox expressions
         if (typeof expression === 'string') {
             return expression;
         }
         
-        if (Array.isArray(expression)) {
-            if (expression[0] === 'get' && expression[1]) {
-                return properties[expression[1]] || '';
-            }
+        if (!Array.isArray(expression)) {
+            return String(expression);
+        }
+        
+        const operator = expression[0];
+        
+        switch (operator) {
+            case 'get':
+                if (expression[1]) {
+                    return properties[expression[1]] || '';
+                }
+                break;
+                
+            case 'interpolate':
+                // Handle interpolate expressions: ['interpolate', ['linear'], ['zoom'], ...stops]
+                if (expression.length >= 4 && properties.zoom !== undefined) {
+                    const zoom = properties.zoom;
+                    const stops = expression.slice(3);
+                    
+                    // Find the appropriate stop based on zoom level
+                    for (let i = 0; i < stops.length - 1; i += 2) {
+                        const stopZoom = stops[i];
+                        const stopValue = stops[i + 1];
+                        const nextStopZoom = stops[i + 2];
+                        
+                        if (zoom <= stopZoom) {
+                            return stopValue;
+                        } else if (zoom <= nextStopZoom) {
+                            // Linear interpolation between stops
+                            const nextStopValue = stops[i + 3];
+                            const ratio = (zoom - stopZoom) / (nextStopZoom - stopZoom);
+                            
+                            // Handle numeric interpolation
+                            if (typeof stopValue === 'number' && typeof nextStopValue === 'number') {
+                                return stopValue + (nextStopValue - stopValue) * ratio;
+                            }
+                            
+                            // For non-numeric values, return the lower stop
+                            return stopValue;
+                        }
+                    }
+                    
+                    // Return the last stop value if zoom is beyond all stops
+                    return stops[stops.length - 1];
+                }
+                break;
+                
+            case 'case':
+                // Handle case expressions: ['case', condition1, value1, condition2, value2, ..., fallback]
+                for (let i = 1; i < expression.length - 1; i += 2) {
+                    const condition = expression[i];
+                    const value = expression[i + 1];
+                    
+                    // Simple condition evaluation
+                    if (this.evaluateCondition(condition, properties)) {
+                        return this.evaluateExpression(value, properties);
+                    }
+                }
+                
+                // Return fallback value
+                return this.evaluateExpression(expression[expression.length - 1], properties);
+                
+            case 'step':
+                // Handle step expressions: ['step', ['get', 'property'], default, stop1, value1, ...]
+                if (expression.length >= 3) {
+                    const input = this.evaluateExpression(expression[1], properties);
+                    const defaultValue = expression[2];
+                    
+                    for (let i = 3; i < expression.length - 1; i += 2) {
+                        const stop = expression[i];
+                        const value = expression[i + 1];
+                        
+                        if (input >= stop) {
+                            return value;
+                        }
+                    }
+                    
+                    return defaultValue;
+                }
+                break;
+                
+            default:
+                // For unknown operators, try to return a reasonable default
+                if (expression.length > 1) {
+                    return this.evaluateExpression(expression[1], properties);
+                }
         }
         
         return String(expression);
+    }
+
+    static evaluateCondition(condition, properties) {
+        if (!Array.isArray(condition)) {
+            return Boolean(condition);
+        }
+        
+        const operator = condition[0];
+        
+        switch (operator) {
+            case '==':
+                return this.evaluateExpression(condition[1], properties) == this.evaluateExpression(condition[2], properties);
+            case '!=':
+                return this.evaluateExpression(condition[1], properties) != this.evaluateExpression(condition[2], properties);
+            case '>':
+                return this.evaluateExpression(condition[1], properties) > this.evaluateExpression(condition[2], properties);
+            case '>=':
+                return this.evaluateExpression(condition[1], properties) >= this.evaluateExpression(condition[2], properties);
+            case '<':
+                return this.evaluateExpression(condition[1], properties) < this.evaluateExpression(condition[2], properties);
+            case '<=':
+                return this.evaluateExpression(condition[1], properties) <= this.evaluateExpression(condition[2], properties);
+            case 'has':
+                return properties.hasOwnProperty(condition[1]);
+            default:
+                return Boolean(condition);
+        }
     }
 }
 
