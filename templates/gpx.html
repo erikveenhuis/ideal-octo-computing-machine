@@ -57,6 +57,12 @@ document.addEventListener('DOMContentLoaded', function() {
             '{{ url_for("static", filename="js/components/export-utilities.js") }}',
             '{{ url_for("static", filename="js/components/map-synchronizer.js") }}',
             '{{ url_for("static", filename="js/components/image-exporter.js") }}',
+            // SVG export modules (load in dependency order)
+            '{{ url_for("static", filename="js/components/style-analyzer.js") }}',
+            '{{ url_for("static", filename="js/components/map-projection.js") }}',
+            '{{ url_for("static", filename="js/components/feature-converter.js") }}',
+            '{{ url_for("static", filename="js/components/feature-organizer.js") }}',
+            '{{ url_for("static", filename="js/components/svg-renderer.js") }}',
             '{{ url_for("static", filename="js/components/svg-exporter.js") }}',
             '{{ url_for("static", filename="js/components/export-manager.js") }}',
             '{{ url_for("static", filename="js/gpx-export-manager.js") }}',
