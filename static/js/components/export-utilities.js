@@ -29,22 +29,30 @@ class ExportUtilities {
     }
 
     static getCanvasSettings(settings, dpi) {
-        // Calculate final print dimensions
-        const finalWidth = Math.round(8.5 * dpi);
-        const finalHeight = Math.round(11 * dpi);
+        // FIXED: Use actual map canvas dimensions instead of fixed print dimensions
+        // Get the actual map canvas dimensions from the current map
+        const map = window.gpxApp?.mapManager?.getMap();
+        let actualCanvasWidth = 850;  // Default fallback
+        let actualCanvasHeight = 1100; // Default fallback
+        
+        if (map) {
+            const canvas = map.getCanvas();
+            actualCanvasWidth = canvas.width;
+            actualCanvasHeight = canvas.height;
+        }
         
         // Use the predefined scaling factor for large offscreen canvas
         const scalingFactor = settings.scalingFactor;
-        const exportCanvasWidth = Math.round(finalWidth * scalingFactor);
-        const exportCanvasHeight = Math.round(finalHeight * scalingFactor);
+        const exportCanvasWidth = Math.round(actualCanvasWidth * scalingFactor);
+        const exportCanvasHeight = Math.round(actualCanvasHeight * scalingFactor);
         
-        console.log(`Canvas settings - Final: ${finalWidth}x${finalHeight}, Canvas: ${exportCanvasWidth}x${exportCanvasHeight}, Scaling: ${scalingFactor}x`);
+        console.log(`Canvas settings - Actual: ${actualCanvasWidth}x${actualCanvasHeight}, Export: ${exportCanvasWidth}x${exportCanvasHeight}, Scaling: ${scalingFactor}x`);
         
         return {
             exportCanvasWidth,
             exportCanvasHeight,
-            finalWidth,
-            finalHeight,
+            finalWidth: actualCanvasWidth,
+            finalHeight: actualCanvasHeight,
             scalingFactor
         };
     }

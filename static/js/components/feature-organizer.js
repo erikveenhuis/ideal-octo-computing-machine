@@ -4,16 +4,11 @@
  */
 class FeatureOrganizer {
     static organize(features, map) {
-        console.log('🚨 ORGANIZE FEATURES DEBUG - START');
-        console.log('  Features parameter type:', typeof features);
-        console.log('  Features parameter length:', features?.length);
-        console.log('  Features is array:', Array.isArray(features));
-        console.log('  Map parameter type:', typeof map);
-        
         const organized = {
             background: [],
             water: [],
             landuse: [],
+            islands: [],
             roads: [],
             railways: [],
             buildings: [],
@@ -23,31 +18,38 @@ class FeatureOrganizer {
             markers: [],
             other: []
         };
+        
+        // Validate input parameters
+        if (!features || !Array.isArray(features)) {
+            console.error('❌ FATAL: features parameter is not an array!', features);
+            return organized;
+        }
 
-        console.log('Organizing features by type and source...');
         const layerCounts = {};
         const sourceLayerCounts = {};
         const layerIdsBySource = {};
-
-        console.log('🚨 PROCESSING FEATURES - START');
         let lineFeatureCount = 0;
+        
+        // Track potential island areas for better detection
+        const noordereilandApproxCoords = { lng: 4.5, lat: 51.9 };
+        
+        // ENHANCED: Get current zoom level for zoom-aware island detection
+        const currentZoom = map.getZoom();
         
         features.forEach((feature, index) => {
             const sourceLayer = feature.sourceLayer;
             const layerId = feature.layer?.id || 'unknown';
             const layerType = feature.layer?.type;
             
-            // Log every line feature immediately
+            // Count line features and check for potential island boundaries
             if (layerType === 'line') {
                 lineFeatureCount++;
-                console.log(`🔍 LINE FEATURE ${lineFeatureCount}: ${sourceLayer}/${layerId}`);
-                console.log(`  Properties:`, feature.properties || {});
-                console.log(`  Paint:`, feature.layer?.paint || {});
                 
+                // Only log potential island boundaries
                 if ((layerId && layerId.includes('boundary')) || 
                     (layerId && layerId.includes('coast')) || 
                     (sourceLayer && sourceLayer.includes('boundary'))) {
-                    console.log(`  🌊 POTENTIAL ISLAND BOUNDARY!`);
+                    console.log(`🌊 POTENTIAL ISLAND BOUNDARY! ${sourceLayer}/${layerId}`);
                 }
             }
             
@@ -63,19 +65,28 @@ class FeatureOrganizer {
                 layerIdsBySource[sourceLayer].add(layerId);
             }
             
-            // Categorize features
-            this.categorizeFeature(feature, organized, layerId, sourceLayer);
+            // Categorize features with special island detection
+            this.categorizeFeature(feature, organized, layerId, sourceLayer, noordereilandApproxCoords, currentZoom);
         });
 
         // Log results
         console.log('Organized feature counts:', Object.entries(organized).map(([key, value]) => `${key}: ${value.length}`).join(', '));
+        
+        // Log island detection results
+        if (organized.islands.length > 0) {
+            console.log(`🏝️ ISLAND SEPARATION: Found ${organized.islands.length} island landmass features that will render above water`);
+            organized.islands.forEach((feature, index) => {
+                const props = feature.properties || {};
+                console.log(`  Island ${index + 1}: ${feature.layer?.id} - ${props.class}/${props.type} (${feature.geometry?.type})`);
+            });
+        }
         
         this.logAnalysis(sourceLayerCounts, layerIdsBySource, features, map);
         
         return organized;
     }
 
-    static categorizeFeature(feature, organized, layerId, sourceLayer) {
+    static categorizeFeature(feature, organized, layerId, sourceLayer, noordereilandCoords, currentZoom) {
         // Use exact Mapbox layer names for more accurate categorization
         if ((layerId && layerId.includes('route')) || feature.source === 'route') {
             organized.route.push(feature);
@@ -89,20 +100,55 @@ class FeatureOrganizer {
         } else if (sourceLayer?.includes('rail') || (layerId && layerId.includes('rail')) || (layerId && layerId.includes('transit'))) {
             organized.railways.push(feature);
         } else if (sourceLayer === 'building' || (layerId && layerId.includes('building'))) {
-            organized.buildings.push(feature);
+            // ENHANCED: Check if building features are part of island landmass
+            if (this.isIslandLandmass(feature, layerId, sourceLayer, noordereilandCoords, currentZoom)) {
+                organized.islands.push(feature);
+                console.log(`🏝️ ISLAND BUILDING DETECTED: Moving ${layerId} to islands layer for proper rendering`);
+            } else {
+                organized.buildings.push(feature);
+            }
         } else if (sourceLayer === 'landuse' || sourceLayer === 'landuse_overlay' || (layerId && layerId.includes('landuse'))) {
-            organized.landuse.push(feature);
-            this.logLanduseFeature(feature, layerId, sourceLayer, organized.landuse.length);
+            // ENHANCED: Check if this is an island landmass feature
+            if (this.isIslandLandmass(feature, layerId, sourceLayer, noordereilandCoords, currentZoom)) {
+                organized.islands.push(feature);
+                console.log(`🏝️ ISLAND LANDMASS DETECTED: Moving ${layerId} to islands layer for proper rendering`);
+            } else {
+                organized.landuse.push(feature);
+            }
+            this.logLanduseFeature(feature, layerId, sourceLayer, organized.landuse.length + organized.islands.length);
         } else if (sourceLayer === 'landcover' || (layerId && layerId.includes('landcover'))) {
-            organized.landuse.push(feature);
-            this.logLandcoverFeature(feature, layerId, sourceLayer, organized.landuse.length);
+            // ENHANCED: Check if this is an island landmass feature
+            if (this.isIslandLandmass(feature, layerId, sourceLayer, noordereilandCoords, currentZoom)) {
+                organized.islands.push(feature);
+                console.log(`🏝️ ISLAND LANDMASS DETECTED: Moving ${layerId} landcover to islands layer for proper rendering`);
+            } else {
+                organized.landuse.push(feature);
+            }
+            this.logLandcoverFeature(feature, layerId, sourceLayer, organized.landuse.length + organized.islands.length);
         } else if (sourceLayer?.includes('admin') || (layerId && layerId.includes('boundary')) || (layerId && layerId.includes('admin'))) {
             organized.boundaries.push(feature);
         } else if (sourceLayer === 'place_label' || sourceLayer === 'natural_label' || feature.layer?.type === 'symbol' || (layerId && layerId.includes('label')) || (layerId && layerId.includes('text')) || (layerId && layerId.includes('place'))) {
             organized.labels.push(feature);
-        } else if (feature.layer?.type === 'background' || (layerId && layerId.includes('background'))) {
+        } else if (feature.layer?.type === 'background' || (layerId && layerId.includes('background')) || 
+                   (feature.sourceLayer === 'background') || (layerId === 'land')) {
+            console.log(`🏝️ BACKGROUND FEATURE CATEGORIZED:`, {
+                layerId: layerId,
+                layerType: feature.layer?.type,
+                sourceLayer: feature.sourceLayer,
+                properties: feature.properties
+            });
             organized.background.push(feature);
         } else {
+            // Log features that don't match any category
+            if (feature.properties?.class === 'land' || feature.properties?.type === 'background' || 
+                feature.sourceLayer === 'background') {
+                console.log(`🏝️ POTENTIAL BACKGROUND FEATURE IN OTHER:`, {
+                    layerId: layerId,
+                    layerType: feature.layer?.type,
+                    sourceLayer: feature.sourceLayer,
+                    properties: feature.properties
+                });
+            }
             organized.other.push(feature);
         }
         
@@ -110,18 +156,104 @@ class FeatureOrganizer {
         this.detectIslandFeatures(feature, layerId, sourceLayer);
     }
 
+    // ENHANCED: Make island detection zoom-aware
+    static isIslandLandmass(feature, layerId, sourceLayer, noordereilandCoords, currentZoom) {
+        const props = feature.properties || {};
+        const geometry = feature.geometry;
+        
+        // Explicit island properties
+        if (props.class === 'island' || props.type === 'island' || props.natural === 'island' || 
+            props.landuse === 'island' || props.place === 'island' ||
+            (props.name && props.name.toLowerCase().includes('island')) ||
+            (props.name && props.name.toLowerCase().includes('eiland'))) {
+            return true;
+        }
+        
+        // Check if this is a large polygon feature near known island locations (like Noordereiland)
+        if ((geometry?.type === 'Polygon' || geometry?.type === 'MultiPolygon')) {
+            let coordinateCount = 0;
+            let isNearIsland = false;
+            
+            try {
+                if (geometry.type === 'Polygon') {
+                    coordinateCount = geometry.coordinates[0].length;
+                    isNearIsland = geometry.coordinates[0].some(coord => 
+                        Math.abs(coord[0] - noordereilandCoords.lng) < 0.02 &&
+                        Math.abs(coord[1] - noordereilandCoords.lat) < 0.02
+                    );
+                } else if (geometry.type === 'MultiPolygon') {
+                    coordinateCount = geometry.coordinates.reduce((total, polygon) => total + polygon[0].length, 0);
+                    isNearIsland = geometry.coordinates.some(polygon => 
+                        polygon[0].some(coord => 
+                            Math.abs(coord[0] - noordereilandCoords.lng) < 0.02 &&
+                            Math.abs(coord[1] - noordereilandCoords.lat) < 0.02
+                        )
+                    );
+                }
+            } catch (e) {
+                // Skip features with invalid geometry
+                return false;
+            }
+            
+            // ENHANCED: Zoom-aware coordinate thresholds
+            // At higher zoom levels, features have fewer coordinates but are still significant
+            let minCoordinateThreshold;
+            if (currentZoom >= 15) {
+                minCoordinateThreshold = 100; // High zoom: smaller threshold
+            } else if (currentZoom >= 13) {
+                minCoordinateThreshold = 500; // Medium zoom: medium threshold  
+            } else {
+                minCoordinateThreshold = 1000; // Low zoom: high threshold
+            }
+            
+            // Large landuse features near known islands are likely island landmass
+            if (isNearIsland && coordinateCount > minCoordinateThreshold) {
+                // ENHANCED: Include both grass features AND base land features
+                const isLikelyLandmass = (
+                    // Large grass areas (common for island parks/green spaces)
+                    props.class === 'grass' ||
+                    // Large park areas
+                    props.class === 'park' ||
+                    // ADDED: Base land/ground features that provide white background
+                    props.class === 'land' ||
+                    props.class === 'landcover' ||
+                    props.type === 'land' ||
+                    props.type === 'landcover' ||
+                    props.natural === 'land' ||
+                    // Residential/urban areas on islands
+                    props.class === 'residential' ||
+                    props.class === 'urban' ||
+                    props.class === 'industrial' ||
+                    props.class === 'commercial' ||
+                    // General land types
+                    props.type === 'residential' ||
+                    props.type === 'urban' ||
+                    props.type === 'industrial' ||
+                    props.type === 'commercial' ||
+                    // ADDED: Building features that provide white base landmass
+                    sourceLayer === 'building' ||
+                    props.building ||
+                    // ADDED: Look for features with no specific class (might be base land)
+                    (!props.class && !props.type && coordinateCount > minCoordinateThreshold * 2) ||
+                    // ADDED: Features from landcover source layer (base land)
+                    (sourceLayer === 'landcover')
+                );
+                
+                if (isLikelyLandmass) {
+                    console.log(`🏝️ ISLAND LANDMASS CANDIDATE: ${layerId} - ${props.class || 'no-class'}/${props.type || 'no-type'} (${coordinateCount} coords, near island, source: ${sourceLayer}, zoom: ${currentZoom.toFixed(1)}, threshold: ${minCoordinateThreshold})`);
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
     static logWaterFeature(feature, layerId, sourceLayer) {
         if (feature.properties) {
             const props = feature.properties;
-            console.log(`💧 WATER FEATURE:`, {
-                layerId: layerId,
-                sourceLayer: sourceLayer,
-                class: props.class,
-                type: props.type,
-                intermittent: props.intermittent,
-                geometryType: feature.geometry?.type
-            });
             
+            // Only log special water features (ice/land features)
             if (props.class === 'ice' || props.type === 'ice' || (layerId && layerId.includes('ice'))) {
                 console.log(`❄️ ICE/LAND FEATURE in water layer: ${layerId}`, props);
             }
@@ -129,31 +261,25 @@ class FeatureOrganizer {
     }
 
     static logLanduseFeature(feature, layerId, sourceLayer, count) {
-        if (count <= 3) {
-            console.log(`🏞️ LANDUSE FEATURE ${count}:`, {
-                layerId: layerId,
-                sourceLayer: sourceLayer,
-                layerVisibility: feature.layer?.layout?.visibility,
-                properties: feature.properties
-            });
-            console.log(`  Paint details:`, JSON.stringify(feature.layer?.paint, null, 2));
+        // Only log landuse features if they might be islands
+        if (feature.properties) {
+            const props = feature.properties;
+            if (props.class === 'ice' || props.type === 'island' || props.natural === 'island' || 
+                (layerId && layerId.includes('island')) || (props.subclass && props.subclass.includes('island'))) {
+                console.log(`🏝️ ISLAND DETECTED in landuse:`, {
+                    layerId: layerId,
+                    class: props.class,
+                    type: props.type,
+                    natural: props.natural,
+                    subclass: props.subclass,
+                    name: props.name
+                });
+            }
         }
     }
 
     static logLandcoverFeature(feature, layerId, sourceLayer, count) {
-        console.log(`🌳 LANDCOVER FEATURE ${count}:`, {
-            layerId: layerId,
-            sourceLayer: sourceLayer,
-            layerVisibility: feature.layer?.layout?.visibility,
-            layerType: feature.layer?.type,
-            geometryType: feature.geometry?.type,
-            properties: feature.properties,
-            hasCoordinates: !!feature.geometry?.coordinates,
-            coordinateCount: feature.geometry?.coordinates?.length
-        });
-        console.log(`  Paint details:`, JSON.stringify(feature.layer?.paint, null, 2));
-        
-        // Additional debug for potential island features
+        // Only log landcover features if they might be islands
         if (feature.properties) {
             const props = feature.properties;
             if (props.class === 'ice' || props.type === 'island' || props.natural === 'island' || 

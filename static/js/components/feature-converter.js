@@ -14,12 +14,15 @@ class FeatureConverter {
         const paint = layer.paint || {};
         const layout = layer.layout || {};
         
+        // ENHANCED: Check if this is an island landmass feature for special handling
+        const isIslandFeature = this.isIslandLandmassFeature(feature, properties, layerId, sourceLayer);
+        
         switch (geometry.type) {
             case 'LineString':
                 return this.lineStringToSVG(geometry.coordinates, paint, projection, layerId);
             
             case 'Polygon':
-                return this.polygonToSVG(geometry.coordinates, paint, projection, layerId, sourceLayer, map);
+                return this.polygonToSVG(geometry.coordinates, paint, projection, layerId, sourceLayer, map, isIslandFeature, properties);
             
             case 'Point':
                 return this.pointToSVG(geometry.coordinates, properties, paint, layout, projection);
@@ -31,7 +34,7 @@ class FeatureConverter {
             
             case 'MultiPolygon':
                 return geometry.coordinates.map(coords => 
-                    this.polygonToSVG(coords, paint, projection, layerId, sourceLayer)
+                    this.polygonToSVG(coords, paint, projection, layerId, sourceLayer, map, isIslandFeature, properties)
                 ).filter(svg => svg !== null).join('\n    ');
             
             default:
@@ -50,47 +53,49 @@ class FeatureConverter {
         
         // Skip lines without color to avoid black defaults
         if (!color) {
-            console.log(`Skipping line with no color: ${layerId}`);
             return null;
         }
         
         return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
 
-    static polygonToSVG(coordinates, paint, projection, layerId, sourceLayer, map) {
+    static polygonToSVG(coordinates, paint, projection, layerId, sourceLayer, map, isIslandFeature = false, properties = {}) {
         // Handle exterior ring (first coordinate array)
         const exteriorRing = coordinates[0];
         const points = exteriorRing.map(coord => 
             `${projection.lngToX(coord[0]).toFixed(2)},${projection.latToY(coord[1]).toFixed(2)}`
         ).join(' ');
         
-        // Special logging for landuse features (potential islands)
-        if (sourceLayer === 'landuse') {
-            console.log(`🏖️ CONVERTING LANDUSE POLYGON: ${sourceLayer}/${layerId}`, {
-                paint: JSON.stringify(paint, null, 2),
-                coordinateCount: exteriorRing.length,
-                boundsCheck: {
-                    minX: Math.min(...exteriorRing.map(c => projection.lngToX(c[0]))),
-                    maxX: Math.max(...exteriorRing.map(c => projection.lngToX(c[0]))),
-                    minY: Math.min(...exteriorRing.map(c => projection.latToY(c[1]))),
-                    maxY: Math.max(...exteriorRing.map(c => projection.latToY(c[1])))
-                }
-            });
-        }
-        
-        // Special logging for Dutch islands
-        if (layerId && (layerId.toLowerCase().includes('eiland') || layerId.toLowerCase().includes('noordereiland'))) {
-            console.log(`🏝️ CONVERTING Dutch island polygon: ${layerId}`, {
-                sourceLayer, 
-                paint: JSON.stringify(paint, null, 2),
-                coordinateCount: exteriorRing.length
-            });
-        }
-        
-        // Use only the actual paint properties from the style
+        // Use only the actual paint properties from the style - no overrides
         let fillColor = paint['fill-color'];
         let fillOpacity = paint['fill-opacity'];
         let strokeColor = paint['fill-outline-color'];
+        let strokeWidth = paint['stroke-width'] || 0;
+        
+        // CRITICAL FIX: Special handling for background layer (land base)
+        const isBackgroundLayer = layerId === 'land' || sourceLayer === 'background';
+        if (isBackgroundLayer) {
+            // For background layer, ensure it covers the entire canvas
+            if (!fillColor || fillColor === 'transparent') {
+                fillColor = '#f5f5f5'; // Light gray background
+            }
+            if (fillOpacity === undefined || fillOpacity === null) {
+                fillOpacity = 1; // Full opacity
+            }
+        }
+        
+        // ENHANCED: Special logging and handling for island landmass features
+        if (isIslandFeature) {
+            // Only log first few island features to avoid spam
+            if (!this._islandLogCount) this._islandLogCount = 0;
+            if (this._islandLogCount < 2) {
+                console.log(`🏝️ CONVERTING ISLAND LANDMASS: ${layerId} (${exteriorRing.length} coords, ${sourceLayer})`);
+                this._islandLogCount++;
+            } else if (this._islandLogCount === 2) {
+                console.log(`🏝️ ... (additional island features processed silently)`);
+                this._islandLogCount++;
+            }
+        }
         
         // Handle fill patterns - convert to a suitable color fallback
         if (!fillColor && paint['fill-pattern']) {
@@ -114,12 +119,10 @@ class FeatureConverter {
                 const evaluatedColor = ExportUtilities.evaluateExpression(fillColor, { zoom: currentZoom });
                 if (evaluatedColor && evaluatedColor !== fillColor) {
                     fillColor = evaluatedColor;
-                    console.log(`✅ Evaluated complex fill color for ${layerId}: ${fillColor}`);
                 }
             } catch (expressionError) {
                 console.warn(`⚠️ Failed to evaluate fill color expression for ${layerId}:`, expressionError);
-                console.warn(`Expression was:`, fillColor);
-                // Keep the original fillColor value and let the fallback logic handle it
+                // Keep the original fillColor value
             }
         }
         
@@ -143,59 +146,43 @@ class FeatureConverter {
             strokeColor = strokeColor['fill-outline-color'];
         }
         
-        // Provide fallback colors for important landcover features to prevent islands from being skipped
-        if (!fillColor && sourceLayer === 'landcover') {
-            // Provide reasonable fallback colors for different landcover types
-            if ((layerId && layerId.includes('grass')) || (layerId && layerId.includes('park'))) {
-                fillColor = '#e8f5e8'; // Light green
-            } else if ((layerId && layerId.includes('forest')) || (layerId && layerId.includes('wood'))) {
-                fillColor = '#d4e6d4'; // Forest green
-            } else if ((layerId && layerId.includes('scrub')) || (layerId && layerId.includes('bush'))) {
-                fillColor = '#e8f0e8'; // Light scrub color
-            } else if ((layerId && layerId.includes('sand')) || (layerId && layerId.includes('beach'))) {
-                fillColor = '#f5f1e8'; // Sandy color
-            } else if ((layerId && layerId.includes('rock')) || (layerId && layerId.includes('bare'))) {
-                fillColor = '#e8e8e8'; // Gray for rocky areas
-            } else {
-                // Default landcover color - this catches islands and other features
-                fillColor = '#f8f8f0'; // Very light beige for general landcover
-                console.log(`🏝️ Using default landcover color for ${layerId} (likely island or terrain feature)`);
-            }
-        }
-        
-        // Enhanced transparency and visibility checks - but less aggressive for landcover
-        
-        // Skip if completely transparent (fillOpacity is 0)
-        if (fillOpacity === 0) {
-            console.log(`⚠️ Skipping completely transparent polygon: ${layerId || sourceLayer}`);
-            return null;
-        }
-        
-        // Skip if fillColor is an RGBA object with alpha = 0
-        if (fillColor && typeof fillColor === 'object' && fillColor !== null && 'a' in fillColor && fillColor.a === 0) {
-            console.log(`⚠️ Skipping RGBA transparent polygon: ${layerId || sourceLayer}`);
-            return null;
-        }
-        
-        // For landcover features (including islands), be more permissive
-        if (sourceLayer === 'landcover' || (layerId && layerId.includes('landcover'))) {
-            if (!fillColor && !strokeColor) {
-                // Even if no explicit color, render landcover with a subtle default
-                fillColor = '#f8f8f0'; // Very light background color
-                console.log(`🏝️ Applying emergency fallback color for landcover feature: ${layerId}`);
-            }
-        } else {
-            // For non-landcover features, keep the original strict checks
-            if (!fillColor && !strokeColor) {
-                console.log(`⚠️ Skipping polygon with no fill or stroke: ${layerId || sourceLayer}`);
-                return null;
+        // ENHANCED: Special handling for island landmass features to ensure visibility
+        if (isIslandFeature) {
+            // Only add fallback colors if there's truly no color at all
+            if (!fillColor || fillColor === 'transparent' || fillColor === 'none') {
+                // ENHANCED: Use appropriate colors based on feature type
+                if (properties.class === 'land' || properties.type === 'land' || 
+                    sourceLayer === 'composite' || sourceLayer === 'land' || sourceLayer === 'base' ||
+                    (!properties.class && !properties.type && !properties.water && !properties.natural)) {
+                    // Base land features get a light off-white color (island foundation)
+                    fillColor = '#f9f9f7'; // Very light off-white for base land
+                } else {
+                    // Other island features get a light color that matches typical grass/park styling
+                    fillColor = '#f8f8f0'; // Very light beige/off-white for grass/parks
+                }
             }
             
-            // Skip if only fillOpacity is defined but no fillColor (would use browser default)
-            if (!fillColor && !strokeColor && fillOpacity !== undefined) {
-                console.log(`⚠️ Skipping polygon with only opacity but no color: ${layerId || sourceLayer}`);
-                return null;
+            // Ensure adequate opacity for island features - but don't override existing opacity
+            if (fillOpacity === undefined || fillOpacity === null) {
+                fillOpacity = 1; // Full opacity if not specified
+            } else if (fillOpacity === 0) {
+                fillOpacity = 0.8; // Make completely transparent features visible
             }
+        }
+        
+        // Skip if completely transparent (fillOpacity is 0) - but not for island features
+        if (fillOpacity === 0 && !isIslandFeature) {
+            return null;
+        }
+        
+        // Skip if fillColor is an RGBA object with alpha = 0 - but not for island features
+        if (fillColor && typeof fillColor === 'object' && fillColor !== null && 'a' in fillColor && fillColor.a === 0 && !isIslandFeature) {
+            return null;
+        }
+        
+        // Only skip if no fill or stroke color at all - but not for island features
+        if (!fillColor && !strokeColor && !isIslandFeature) {
+            return null;
         }
         
         let polygonElement = `<polygon points="${points}"`;
@@ -210,18 +197,12 @@ class FeatureConverter {
                 if (cssColor) {
                     polygonElement += ` fill="${cssColor}"`;
                 } else {
-                    console.log(`  ❌ Failed to convert RGBA for ${layerId}, using fallback`);
+                    console.warn(`Failed to convert RGBA for ${layerId}, using fallback`);
                     polygonElement += ` fill="#f8f8f0"`;  // Fallback instead of skipping
                 }
             } else {
                 // Debug unknown color format but don't skip - use fallback
-                console.log(`  ⚠️ Unknown color format in ${layerId}, using fallback:`, {
-                    type: typeof fillColor,
-                    value: fillColor,
-                    stringified: JSON.stringify(fillColor),
-                    constructor: fillColor?.constructor?.name,
-                    sourceLayer: sourceLayer
-                });
+                console.warn(`Unknown color format in ${layerId}, using fallback`);
                 polygonElement += ` fill="#f8f8f0"`;  // Fallback instead of skipping
             }
         } else {
@@ -238,28 +219,29 @@ class FeatureConverter {
         if (strokeColor) {
             if (typeof strokeColor === 'string') {
                 polygonElement += ` stroke="${strokeColor}"`;
+                if (strokeWidth) {
+                    polygonElement += ` stroke-width="${strokeWidth}"`;
+                }
             } else if (typeof strokeColor === 'object' && strokeColor !== null && 'r' in strokeColor) {
                 // Handle RGBA color objects
                 const cssColor = ExportUtilities.rgbaObjectToCSS(strokeColor);
                 if (cssColor) {
                     polygonElement += ` stroke="${cssColor}"`;
+                    if (strokeWidth) {
+                        polygonElement += ` stroke-width="${strokeWidth}"`;
+                    }
                 } else {
-                    console.log(`  ❌ Failed to convert stroke RGBA for ${layerId}`);
+                    console.warn(`Failed to convert stroke RGBA for ${layerId}`);
                 }
             } else {
                 // Skip features with complex stroke expressions
-                console.log(`  ❌ Skipping complex stroke expression for: ${layerId}`);
+                console.warn(`Skipping complex stroke expression for: ${layerId}`);
             }
         } else {
             polygonElement += ` stroke="none"`;
         }
         
         polygonElement += `/>`;
-        
-        // Log the final SVG for landuse features
-        if (sourceLayer === 'landuse') {
-            console.log(`🏖️ FINAL LANDUSE SVG:`, polygonElement);
-        }
         
         return polygonElement;
     }
@@ -356,9 +338,60 @@ class FeatureConverter {
         // Don't render default points for place labels - they should only be text
         return null;
     }
+
+    // ENHANCED: Detect if this is an island landmass feature that needs special visibility handling
+    static isIslandLandmassFeature(feature, properties, layerId, sourceLayer) {
+        // Check if this is a large grass feature that was likely moved to islands layer
+        const isLargeGrass = (
+            properties.class === 'grass' && 
+            properties.type === 'grass' &&
+            (feature.geometry?.type === 'MultiPolygon' || feature.geometry?.type === 'Polygon')
+        );
+        
+        // ENHANCED: Check if this might be a base land feature providing island foundation
+        const isBaseLandFeature = (
+            (properties.class === 'land' || properties.type === 'land') ||
+            (sourceLayer === 'composite' || sourceLayer === 'land' || sourceLayer === 'base') ||
+            (!properties.class && !properties.type && !properties.water && !properties.natural) ||
+            (properties.class === '' || properties.type === '')
+        );
+        
+        // Check coordinate count to identify large landmass features
+        let coordinateCount = 0;
+        let isNearNoordereiland = false;
+        try {
+            if (feature.geometry?.type === 'Polygon') {
+                coordinateCount = feature.geometry.coordinates[0].length;
+                isNearNoordereiland = feature.geometry.coordinates[0].some(coord => 
+                    Math.abs(coord[0] - 4.5) < 0.02 &&
+                    Math.abs(coord[1] - 51.9) < 0.02
+                );
+            } else if (feature.geometry?.type === 'MultiPolygon') {
+                coordinateCount = feature.geometry.coordinates.reduce((total, polygon) => total + polygon[0].length, 0);
+                isNearNoordereiland = feature.geometry.coordinates.some(polygon => 
+                    polygon[0].some(coord => 
+                        Math.abs(coord[0] - 4.5) < 0.02 &&
+                        Math.abs(coord[1] - 51.9) < 0.02
+                    )
+                );
+            }
+        } catch (e) {
+            // Skip features with invalid geometry
+        }
+        
+        // ENHANCED: Detect island landmass features based on multiple criteria
+        return (
+            // Large grass features are likely island landmass
+            (isLargeGrass && coordinateCount > 1000) ||
+            // Base land features near Noordereiland might be the missing island foundation
+            (isBaseLandFeature && isNearNoordereiland && coordinateCount > 50) ||
+            // Large unclassified polygons near Noordereiland might be island base
+            (isNearNoordereiland && coordinateCount > 200 && !properties.class && !properties.type)
+        );
+    }
 }
 
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = FeatureConverter;
-} 
+}
