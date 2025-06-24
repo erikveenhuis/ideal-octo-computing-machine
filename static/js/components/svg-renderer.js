@@ -15,11 +15,24 @@ class SVGRenderer {
         // Pass visual bounds if available for more accurate projection
         const projection = MapProjection.create(bounds, center, width, height, bearing, visualBounds);
         
+        // Generate font definitions for embedded fonts
+        console.log('🔤 Generating font definitions...');
+        const usedFonts = FeatureConverter.getUsedFonts();
+        let fontDefinitions = '';
+        
+        if (usedFonts.length > 0) {
+            const fontManager = FeatureConverter.initializeFontManager();
+            fontDefinitions = await fontManager.generateSVGFontDefinitions(usedFonts);
+            console.log(`✅ Generated font definitions for ${usedFonts.length} font variants`);
+        }
+        
         let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" 
      xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
   <title>GPX Route Export - ${new Date().toISOString().split('T')[0]}</title>
   <desc>Vector export of map view centered at ${center.lat.toFixed(6)}, ${center.lng.toFixed(6)} (zoom ${zoom.toFixed(2)}, bearing ${bearing.toFixed(1)}°)</desc>
+  
+  ${fontDefinitions}
   
   <!-- Background -->
   <rect width="100%" height="100%" fill="${backgroundColor}"/>
@@ -74,27 +87,10 @@ class SVGRenderer {
             }
         });
         
-        // SPECIAL HANDLING: Add islands layer right after water if we have island features
-        if (availableLayerTypes.includes('islands') && !processedTypes.has('islands')) {
-            // Find water layer position
-            const waterIndex = renderOrder.findIndex(item => item.type === 'water');
-            const insertIndex = waterIndex >= 0 ? waterIndex + 1 : renderOrder.length;
-            
-            renderOrder.splice(insertIndex, 0, {
-                type: 'islands',
-                styleOrder: waterIndex >= 0 ? renderOrder[waterIndex].styleOrder + 0.5 : 999,
-                sourceLayer: 'landuse-islands',
-                layerId: 'island-landmass'
-            });
-            processedTypes.add('islands');
-            
-            console.log(`🏝️ ISLAND LAYER: Inserted islands layer at position ${insertIndex} (after water)`);
-        }
-        
         // Add any remaining layer types that weren't found in the style
         availableLayerTypes.forEach(layerType => {
             if (!processedTypes.has(layerType)) {
-                // CRITICAL FIX: Background should render FIRST (bottom), not last (top)
+                // Background should render first, others at the end
                 const styleOrder = layerType === 'background' ? -1 : 999;
                 renderOrder.push({
                     type: layerType,
@@ -123,14 +119,66 @@ class SVGRenderer {
                 svgContent += `  <!-- ${layerName.toUpperCase()} LAYER (from ${layerInfo.sourceLayer}) -->\n`;
                 svgContent += `  <g class="${layerName}-layer">\n`;
                 
-                for (const feature of features) {
-                    const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
-                    if (svgElement) {
-                        svgContent += `    ${svgElement}\n`;
+                let renderedCount = 0;
+                let skippedCount = 0;
+                
+                // ENHANCED: Special handling for roads to ensure proper CASE -> FILL rendering order
+                if (layerName === 'roads') {
+                    // Separate case and fill features
+                    const caseFeatures = features.filter(f => f.layer?.id?.includes('-case'));
+                    const fillFeatures = features.filter(f => f.layer?.id && !f.layer.id.includes('-case'));
+                    
+                    console.log(`🛣️ RENDERING ROADS: ${caseFeatures.length} case + ${fillFeatures.length} fill`);
+                    
+                    // Render case features first (darker outlines)
+                    svgContent += `    <!-- Road Case Layers (outlines) -->\n`;
+                    for (const feature of caseFeatures) {
+                        const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
+                        if (svgElement) {
+                            svgContent += `    ${svgElement}\n`;
+                            renderedCount++;
+                        } else {
+                            skippedCount++;
+                        }
+                    }
+                    
+                    // Render fill features on top (lighter centers)
+                    svgContent += `    <!-- Road Fill Layers (centers) -->\n`;
+                    for (const feature of fillFeatures) {
+                        const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
+                        if (svgElement) {
+                            svgContent += `    ${svgElement}\n`;
+                            renderedCount++;
+                        } else {
+                            skippedCount++;
+                        }
+                    }
+                } else {
+                    // Normal processing for non-road layers
+                    for (const feature of features) {
+                        const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
+                        if (svgElement) {
+                            svgContent += `    ${svgElement}\n`;
+                            renderedCount++;
+                        } else {
+                            skippedCount++;
+                            
+                            // Log skipped island features for debugging
+                            if (layerName === 'islands') {
+                                const props = feature.properties || {};
+                                console.log(`⚠️ SKIPPED ISLAND FEATURE: ${feature.layer?.id} - ${props.class}/${props.type} (no SVG generated)`);
+                            }
+                        }
                     }
                 }
                 
                 svgContent += `  </g>\n`;
+                
+                // Summary logging for all layers
+                console.log(`🎨 ${layerName.toUpperCase()} SUMMARY: ${renderedCount} rendered, ${skippedCount} skipped`);
+                if (skippedCount > 0 && layerName === 'landuse') {
+                    console.log(`⚠️ ${skippedCount} landuse features (including potential islands) were skipped - check styling`);
+                }
             }
         }
 

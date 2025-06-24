@@ -10,6 +10,11 @@ class SVGExporter {
     async saveAsSVG() {
         try {
             console.log('🚀 Starting SVG export...');
+            
+            // Reset font tracking for this export
+            FeatureConverter.resetFontTracking();
+            console.log('🔤 Reset font tracking for new export');
+            
             showToast('🗺️ Analyzing visible map features for vector export...', 'success');
             
             const map = this.mapManager.getMap();
@@ -310,37 +315,7 @@ class SVGExporter {
             const allLayerIds = allLayers.map(layer => layer.id);
             const allSourceLayers = new Set();
             
-            // CRITICAL: Try to query landcover features specifically, even if they're slightly out of zoom range
-            console.log('🏝️ ATTEMPTING DIRECT LANDCOVER QUERY (ignoring zoom range)...');
-            try {
-                const landcoverLayers = allLayers.filter(layer => 
-                    layer['source-layer'] === 'landcover' || layer.id.includes('landcover')
-                );
-                
-                if (landcoverLayers.length > 0) {
-                    console.log(`🔍 Found ${landcoverLayers.length} landcover layers, attempting direct query...`);
-                    const landcoverFeatures = map.queryRenderedFeatures(undefined, {
-                        layers: landcoverLayers.map(l => l.id),
-                        validate: false
-                    });
-                    
-                    if (landcoverFeatures.length > 0) {
-                        console.log(`✅ FOUND ${landcoverFeatures.length} LANDCOVER FEATURES via direct query!`);
-                        landcoverFeatures.forEach((feature, index) => {
-                            if (index < 3) {
-                                console.log(`  Landcover ${index + 1}: ${feature.layer?.id} - ${feature.properties?.class}/${feature.properties?.type} (${feature.geometry?.type})`);
-                            }
-                        });
-                        combinedQueryFeatures.push(...landcoverFeatures);
-                    } else {
-                        console.log('⚠️ Direct landcover query returned no features');
-                    }
-                } else {
-                    console.log('⚠️ No landcover layers found for direct query');
-                }
-            } catch (landcoverError) {
-                console.log('⚠️ Error in direct landcover query:', landcoverError.message);
-            }
+            // Skip landcover querying since it's intentionally hidden in the style
             
             // Collect all source layers from the style
             allLayers.forEach(layer => {
@@ -354,15 +329,15 @@ class SVGExporter {
             
             // ENHANCED: Detailed analysis of landcover layer availability
             console.log('🔍 DETAILED LAYER ANALYSIS:');
-            const landcoverLayers = allLayers.filter(layer => 
+            const detailedLandcoverLayers = allLayers.filter(layer => 
                 layer['source-layer'] === 'landcover' || 
                 layer.id.includes('landcover') ||
                 layer.id.includes('land')
             );
             
-            if (landcoverLayers.length > 0) {
-                console.log(`✅ Found ${landcoverLayers.length} landcover-related layers:`);
-                landcoverLayers.forEach(layer => {
+            if (detailedLandcoverLayers.length > 0) {
+                console.log(`✅ Found ${detailedLandcoverLayers.length} landcover-related layers:`);
+                detailedLandcoverLayers.forEach(layer => {
                     console.log(`  - ${layer.id}: source-layer="${layer['source-layer']}", type="${layer.type}", minzoom=${layer.minzoom || 'none'}, maxzoom=${layer.maxzoom || 'none'}, visibility=${layer.layout?.visibility || 'visible'}`);
                 });
             } else {
@@ -1363,17 +1338,25 @@ class SVGExporter {
                     const lineOpacity = paint['line-opacity'];
                     const lineColor = paint['line-color'];
                     
+                    // Debug road layer filtering (only log when roads are skipped)
+                    const isRoadLayer = layer.id && (layer.id.includes('road') || layer.id.includes('street') || layer.id.includes('highway'));
+                    
                     // Skip completely transparent lines
                     if (lineOpacity === 0) {
-                        console.log(`Skipping transparent line layer: ${layer.id}`);
+                        if (isRoadLayer) console.log(`🛣️ SKIPPED ${layer.id} - transparent (opacity=0)`);
+                        else console.log(`Skipping transparent line layer: ${layer.id}`);
                         return false;
                     }
                     
                     // Be more permissive with potential coastlines and boundaries
                     if (!isLikelyIsland && !isLandPolygon && !(layer.id && (layer.id.includes('coast') || layer.id.includes('boundary')))) {
-                        // Skip lines without color
+                        // Skip lines without color - but be more lenient with roads
                         if (!lineColor) {
-                            console.log(`Skipping line layer without color: ${layer.id}`);
+                            if (isRoadLayer) {
+                                console.log(`🛣️ SKIPPED ${layer.id} - no color defined`);
+                            } else {
+                                console.log(`Skipping line layer without color: ${layer.id}`);
+                            }
                             return false;
                         }
                     }
@@ -1384,6 +1367,22 @@ class SVGExporter {
             console.log('✅ Filtered features');
             
             console.log(`Features found - Rendered: ${uniqueFeatures.length}, Filtered: ${filteredRenderedFeatures.length} (removed ${uniqueFeatures.length - filteredRenderedFeatures.length} invisible features)`);
+            
+            // Debug: Check what road layers we found
+            const roadFeatures = uniqueFeatures.filter(f => 
+                f.sourceLayer === 'road' || 
+                (f.layer?.id && (f.layer.id.includes('road') || f.layer.id.includes('street') || f.layer.id.includes('highway')))
+            );
+            
+            console.log(`🛣️ ROAD LAYER ANALYSIS: Found ${roadFeatures.length} road features`);
+            const roadLayerIds = [...new Set(roadFeatures.map(f => f.layer?.id))].sort();
+            console.log(`🛣️ ROAD LAYERS FOUND:`, roadLayerIds);
+            
+            // Separate case vs fill layers
+            const caseLayerIds = roadLayerIds.filter(id => id && id.includes('-case'));
+            const fillLayerIds = roadLayerIds.filter(id => id && !id.includes('-case'));
+            console.log(`🛣️ CASE LAYERS (${caseLayerIds.length}):`, caseLayerIds);
+            console.log(`🛣️ FILL LAYERS (${fillLayerIds.length}):`, fillLayerIds);
             
             // Quick feature check
             if (!filteredRenderedFeatures || filteredRenderedFeatures.length === 0) {

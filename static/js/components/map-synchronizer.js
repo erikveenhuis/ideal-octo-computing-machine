@@ -318,7 +318,8 @@ class MapSynchronizer {
                     ...originalLayer,
                     paint: {
                         ...originalLayer.paint,
-                        'line-width': originalLayer.paint['line-width'] * scalingFactor
+                        'line-width': originalLayer.paint['line-width'] * scalingFactor,
+                        'line-opacity': 0.7 // Match canvas route opacity
                     }
                 };
                 
@@ -338,7 +339,8 @@ class MapSynchronizer {
                     source: 'markers',
                     paint: {
                         'circle-radius': scaledCircleRadius,
-                        'circle-color': ['get', 'marker-color']
+                        'circle-color': ['get', 'marker-color'],
+                        'circle-opacity': 0.8 // Match canvas marker opacity
                     }
                 });
                 

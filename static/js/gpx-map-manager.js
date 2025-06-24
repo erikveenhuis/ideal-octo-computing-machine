@@ -148,7 +148,7 @@ class GPXMapManager {
             paint: {
                 'line-color': document.getElementById('routeColor').value,
                 'line-width': parseInt(document.getElementById('routeWidth').value, 10),
-                'line-opacity': 0.7
+                'line-opacity': 0.7 // Much softer appearance
             }
         };
 
@@ -207,14 +207,15 @@ class GPXMapManager {
         // Add markers source and layer
         this.map.addSource('markers', this.markersSource);
         
-        // Add circle background layer
+        // Add circle background layer with subtle glow
         this.map.addLayer({
             id: 'marker-circles',
             type: 'circle',
             source: 'markers',
             paint: {
                 'circle-radius': 10,
-                'circle-color': ['get', 'marker-color']
+                'circle-color': ['get', 'marker-color'],
+                'circle-opacity': 0.8 // Much softer appearance
             }
         });
         
@@ -228,6 +229,7 @@ class GPXMapManager {
                 'text-size': 12,
                 'text-anchor': 'center',
                 'text-allow-overlap': true,
+                'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'], // Make text bold to match export
                 'icon-image': 'none'
             },
             paint: {
