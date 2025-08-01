@@ -3,8 +3,8 @@ class GPXMapManager {
         this.mapboxAccessToken = mapboxAccessToken;
         this.map = null;
         this.currentStyle = 'forex';
-        this.routeSource = null;
-        this.routeLayer = null;
+        this.routes = new Map(); // Store multiple routes
+        this.activeRouteId = null; // Currently selected route for editing
         this.markersSource = null;
         this.showMarkers = true;
         this.antialiasing = true;
@@ -103,33 +103,36 @@ class GPXMapManager {
     }
 
     cleanupMapData() {
-        // Remove layers in reverse order of dependency
-        if (this.map.getLayer('marker-circles')) this.map.removeLayer('marker-circles');
-        if (this.map.getLayer('markers')) this.map.removeLayer('markers');
-        if (this.map.getLayer('route')) this.map.removeLayer('route');
+        // Remove all route sources and layers
+        this.routes.forEach((route, routeId) => {
+            if (this.map.getSource(routeId)) {
+                this.map.removeLayer(routeId);
+                this.map.removeSource(routeId);
+            }
+        });
+        this.routes.clear();
+        this.activeRouteId = null;
 
-        // Remove sources after their dependent layers are gone
-        if (this.map.getSource('markers')) this.map.removeSource('markers');
-        if (this.map.getSource('route')) this.map.removeSource('route');
-
-        // Reset state variables
-        this.routeSource = null;
-        this.routeLayer = null;
+        // Remove markers
+        if (this.map.getSource('markers')) {
+            this.map.removeLayer('marker-circles');
+            this.map.removeSource('markers');
+        }
         this.markersSource = null;
     }
 
-    async loadGPXData(trackPoints) {
-        // Ensure the map is clean before adding new data
-        this.cleanupMapData();
-
+    async addRoute(routeId, trackPoints, color, filename) {
         // Create GeoJSON for the route
         const coordinates = trackPoints.map(point => [point.lon, point.lat]);
         
-        this.routeSource = {
+        const routeSource = {
             type: 'geojson',
             data: {
                 type: 'Feature',
-                properties: {},
+                properties: {
+                    name: filename,
+                    color: color
+                },
                 geometry: {
                     type: 'LineString',
                     coordinates: coordinates
@@ -137,36 +140,126 @@ class GPXMapManager {
             }
         };
 
-        this.routeLayer = {
-            id: 'route',
+        const routeLayer = {
+            id: routeId,
             type: 'line',
-            source: 'route',
+            source: routeId,
             layout: {
                 'line-join': 'round',
                 'line-cap': 'round'
             },
             paint: {
-                'line-color': document.getElementById('routeColor').value,
+                'line-color': color,
                 'line-width': parseInt(document.getElementById('routeWidth').value, 10),
-                'line-opacity': 0.7 // Much softer appearance
+                'line-opacity': 0.7
             }
         };
 
-        // Add the route to the map
-        this.map.addSource('route', this.routeSource);
-        this.map.addLayer(this.routeLayer);
+        // Store route data with marker colors
+        this.routes.set(routeId, {
+            source: routeSource,
+            layer: routeLayer,
+            coordinates: coordinates,
+            color: color,
+            filename: filename,
+            startMarkerColor: document.getElementById('startMarkerColor').value,
+            finishMarkerColor: document.getElementById('finishMarkerColor').value
+        });
 
-        // Add markers if enabled
-        if (this.showMarkers && coordinates.length > 0) {
-            this.createMarkers(coordinates);
+        // Add the route to the map
+        this.map.addSource(routeId, routeSource);
+        this.map.addLayer(routeLayer);
+
+        // Set as active route if it's the first one
+        if (!this.activeRouteId) {
+            this.setActiveRoute(routeId);
         }
 
-        // Fit bounds to the route
-        this.fitBoundsToRoute(coordinates);
+        // Add markers if enabled and this is the first route
+        if (this.showMarkers && this.routes.size === 1) {
+            this.createMarkers(coordinates, routeId);
+        }
+
+        // Fit bounds to all routes
+        this.fitBoundsToAllRoutes();
+        
+        // Trigger UI update if gpxApp exists
+        if (window.gpxApp && window.gpxApp.updateRouteManagementUI) {
+            window.gpxApp.updateRouteManagementUI();
+        }
     }
 
-    createMarkers(coordinates) {
-        const routeColor = document.getElementById('routeColor').value;
+    setActiveRoute(routeId) {
+        this.activeRouteId = routeId;
+        const route = this.routes.get(routeId);
+        if (route) {
+            // Update color picker to show active route color
+            const colorInput = document.getElementById('routeColor');
+            if (colorInput) {
+                colorInput.value = route.color;
+            }
+            
+            // Update route width to show active route width
+            const widthInput = document.getElementById('routeWidth');
+            if (widthInput) {
+                widthInput.value = route.layer.paint['line-width'];
+            }
+            
+            // Update marker color pickers
+            const startMarkerColorInput = document.getElementById('startMarkerColor');
+            if (startMarkerColorInput) {
+                startMarkerColorInput.value = route.startMarkerColor;
+            }
+            
+            const finishMarkerColorInput = document.getElementById('finishMarkerColor');
+            if (finishMarkerColorInput) {
+                finishMarkerColorInput.value = route.finishMarkerColor;
+            }
+        }
+    }
+
+    removeRoute(routeId) {
+        const route = this.routes.get(routeId);
+        if (route) {
+            // Remove from map
+            if (this.map.getSource(routeId)) {
+                this.map.removeLayer(routeId);
+                this.map.removeSource(routeId);
+            }
+            
+            // Remove from routes map
+            this.routes.delete(routeId);
+            
+            // Update active route if needed
+            if (this.activeRouteId === routeId) {
+                const firstRouteId = this.routes.keys().next().value;
+                this.setActiveRoute(firstRouteId || null);
+            }
+            
+            // Update markers if no routes left
+            if (this.routes.size === 0) {
+                if (this.map.getSource('markers')) {
+                    this.map.removeLayer('marker-circles');
+                    this.map.removeSource('markers');
+                }
+                this.markersSource = null;
+            } else {
+                // Fit bounds to remaining routes
+                this.fitBoundsToAllRoutes();
+            }
+            
+            // Trigger UI update if gpxApp exists
+            if (window.gpxApp && window.gpxApp.updateRouteManagementUI) {
+                window.gpxApp.updateRouteManagementUI();
+            }
+        }
+    }
+
+    createMarkers(coordinates, routeId) {
+        if (coordinates.length === 0) return;
+        
+        const route = this.routes.get(routeId);
+        if (!route) return;
         
         // Create GeoJSON for markers
         this.markersSource = {
@@ -178,7 +271,8 @@ class GPXMapManager {
                         type: 'Feature',
                         properties: {
                             'marker-symbol': 'S',
-                            'marker-color': routeColor
+                            'marker-color': route.startMarkerColor,
+                            'route-id': routeId
                         },
                         geometry: {
                             type: 'Point',
@@ -189,7 +283,8 @@ class GPXMapManager {
                         type: 'Feature',
                         properties: {
                             'marker-symbol': 'F',
-                            'marker-color': routeColor
+                            'marker-color': route.finishMarkerColor,
+                            'route-id': routeId
                         },
                         geometry: {
                             type: 'Point',
@@ -204,6 +299,8 @@ class GPXMapManager {
     }
 
     addMarkersToMap() {
+        if (!this.markersSource) return;
+        
         // Add markers source and layer
         this.map.addSource('markers', this.markersSource);
         
@@ -215,92 +312,130 @@ class GPXMapManager {
             paint: {
                 'circle-radius': 10,
                 'circle-color': ['get', 'marker-color'],
-                'circle-opacity': 0.8 // Much softer appearance
+                'circle-opacity': 0.8
             }
+        });
+    }
+
+    fitBoundsToAllRoutes() {
+        if (this.routes.size === 0) return;
+        
+        const bounds = new mapboxgl.LngLatBounds();
+        
+        this.routes.forEach((route) => {
+            route.coordinates.forEach(coord => {
+                bounds.extend(coord);
+            });
         });
         
-        // Add text layer on top
-        this.map.addLayer({
-            id: 'markers',
-            type: 'symbol',
-            source: 'markers',
-            layout: {
-                'text-field': ['get', 'marker-symbol'],
-                'text-size': 12,
-                'text-anchor': 'center',
-                'text-allow-overlap': true,
-                'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'], // Make text bold to match export
-                'icon-image': 'none'
-            },
-            paint: {
-                'text-color': '#ffffff'
-            }
+        // Add some padding
+        this.map.fitBounds(bounds, {
+            padding: 50,
+            duration: 1000
         });
     }
 
-    fitBoundsToRoute(coordinates) {
-        const bounds = coordinates.reduce((bounds, coord) => {
-            return bounds.extend(coord);
-        }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
-
-        // Add padding to the bounds before fitting
-        const paddedBounds = bounds.extend([
-            bounds.getSouthWest().lng - 0.01,
-            bounds.getSouthWest().lat - 0.01
-        ]);
-
-        this.map.fitBounds(paddedBounds, {
-            padding: {
-                top: 50,
-                bottom: 100,
-                left: 50,
-                right: 50
-            },
-            duration: 1000,
-            maxZoom: 15
-        });
-    }
-
-    updateRouteColor(color) {
-        if (this.routeLayer) {
-            this.map.setPaintProperty('route', 'line-color', color);
-            // Update marker colors if they exist
-            if (this.map.getSource('markers')) {
-                const markersSource = this.map.getSource('markers');
-                const data = markersSource.serialize().data;
-                data.features.forEach(feature => {
+    updateActiveRouteColor(color) {
+        if (!this.activeRouteId) return;
+        
+        const route = this.routes.get(this.activeRouteId);
+        if (route) {
+            route.color = color;
+            route.layer.paint['line-color'] = color;
+            
+            // Update the map layer
+            this.map.setPaintProperty(this.activeRouteId, 'line-color', color);
+            
+            // Update markers color if this route has markers
+            if (this.markersSource) {
+                this.markersSource.data.features.forEach(feature => {
                     feature.properties['marker-color'] = color;
                 });
-                markersSource.setData(data);
+                this.map.getSource('markers').setData(this.markersSource.data);
             }
         }
     }
 
-    updateRouteWidth(width) {
-        if (this.routeLayer) {
-            this.map.setPaintProperty('route', 'line-width', parseInt(width, 10));
+    updateActiveRouteWidth(width) {
+        if (!this.activeRouteId) return;
+        
+        const route = this.routes.get(this.activeRouteId);
+        if (route) {
+            route.layer.paint['line-width'] = parseInt(width, 10);
+            this.map.setPaintProperty(this.activeRouteId, 'line-width', parseInt(width, 10));
+        }
+    }
+
+    updateActiveRouteStartMarkerColor(color) {
+        if (!this.activeRouteId) return;
+        
+        const route = this.routes.get(this.activeRouteId);
+        if (route) {
+            route.startMarkerColor = color;
+            
+            // Update markers if they exist and belong to this route
+            if (this.markersSource) {
+                const startMarker = this.markersSource.data.features.find(
+                    feature => feature.properties['marker-symbol'] === 'S' && 
+                              feature.properties['route-id'] === this.activeRouteId
+                );
+                if (startMarker) {
+                    startMarker.properties['marker-color'] = color;
+                    this.map.getSource('markers').setData(this.markersSource.data);
+                }
+            }
+        }
+    }
+
+    updateActiveRouteFinishMarkerColor(color) {
+        if (!this.activeRouteId) return;
+        
+        const route = this.routes.get(this.activeRouteId);
+        if (route) {
+            route.finishMarkerColor = color;
+            
+            // Update markers if they exist and belong to this route
+            if (this.markersSource) {
+                const finishMarker = this.markersSource.data.features.find(
+                    feature => feature.properties['marker-symbol'] === 'F' && 
+                              feature.properties['route-id'] === this.activeRouteId
+                );
+                if (finishMarker) {
+                    finishMarker.properties['marker-color'] = color;
+                    this.map.getSource('markers').setData(this.markersSource.data);
+                }
+            }
         }
     }
 
     changeMapStyle(newStyle) {
-        this.setAndFixStyle(mapStyles[newStyle]);
         this.currentStyle = newStyle;
+        this.setAndFixStyle(mapStyles[newStyle]);
     }
 
     toggleMarkers(show) {
         this.showMarkers = show;
         
-        // Toggle both marker layers visibility
-        if (this.map.getLayer('markers')) {
-            this.map.setLayoutProperty('markers', 'visibility', show ? 'visible' : 'none');
-        }
-        if (this.map.getLayer('marker-circles')) {
-            this.map.setLayoutProperty('marker-circles', 'visibility', show ? 'visible' : 'none');
+        if (show && this.routes.size > 0) {
+            // Show markers for the active route, or first route if no active route
+            const routeId = this.activeRouteId || this.routes.keys().next().value;
+            const route = this.routes.get(routeId);
+            if (route) {
+                this.createMarkers(route.coordinates, routeId);
+            }
+        } else {
+            // Remove markers
+            if (this.map.getSource('markers')) {
+                this.map.removeLayer('marker-circles');
+                this.map.removeSource('markers');
+            }
+            this.markersSource = null;
         }
     }
 
     toggleAntialiasing(enabled) {
         this.antialiasing = enabled;
+        // Note: Mapbox GL JS handles antialiasing automatically
     }
 
     getMap() {
@@ -308,12 +443,19 @@ class GPXMapManager {
     }
 
     getRouteData() {
-        return {
-            routeSource: this.routeSource,
-            routeLayer: this.routeLayer,
-            markersSource: this.markersSource,
-            showMarkers: this.showMarkers
-        };
+        return Array.from(this.routes.values()).map(route => ({
+            coordinates: route.coordinates,
+            color: route.color,
+            filename: route.filename
+        }));
+    }
+
+    getActiveRoute() {
+        return this.activeRouteId ? this.routes.get(this.activeRouteId) : null;
+    }
+
+    getAllRoutes() {
+        return this.routes;
     }
 }
 

@@ -3,6 +3,7 @@ class GPXApp {
         this.mapManager = new GPXMapManager(mapboxAccessToken);
         this.csrfToken = csrfToken;
         this.exportManager = null; // Will be initialized when needed
+        this.uploadedRoutes = new Map(); // Track uploaded routes with their colors
         
         this.init();
     }
@@ -18,8 +19,6 @@ class GPXApp {
         this.initializeFormValidation();
     }
 
-
-
     initializeFormValidation() {
         // Initialize GPX upload form validation
         const uploadForm = document.getElementById('uploadForm');
@@ -32,17 +31,17 @@ class GPXApp {
             });
 
             // Add validation rules for GPX file input
-            formValidator.addFieldValidation(formId, 'gpxFile', [
+            formValidator.addFieldValidation(formId, 'gpxFiles', [
                 'required',
                 {
                     rule: 'fileType',
                     params: ['.gpx', 'application/gpx+xml'],
-                    message: 'Please select a valid GPX file'
+                    message: 'Please select valid GPX files'
                 },
                 {
                     rule: 'fileSize',
-                    params: [10 * 1024 * 1024], // 10MB limit
-                    message: 'File size must be less than 10MB'
+                    params: [10 * 1024 * 1024], // 10MB limit per file
+                    message: 'Each file must be less than 10MB'
                 }
             ]);
 
@@ -52,26 +51,39 @@ class GPXApp {
     }
 
     setupEventListeners() {
-        // File upload handler
-        document.getElementById('gpxFile').addEventListener('change', (e) => {
-            this.handleFileUpload(e);
+        // File selection handler
+        document.getElementById('gpxFiles').addEventListener('change', (e) => {
+            this.handleFileSelection(e);
         });
 
-        // Route controls
+        // Form submission handler
+        document.getElementById('uploadForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleFormSubmission();
+        });
+
+        // Route controls (now for the active route)
         document.getElementById('routeColor').addEventListener('input', (e) => {
-            this.mapManager.updateRouteColor(e.target.value);
+            this.mapManager.updateActiveRouteColor(e.target.value);
         });
 
         document.getElementById('routeWidth').addEventListener('input', (e) => {
-            this.mapManager.updateRouteWidth(e.target.value);
+            this.mapManager.updateActiveRouteWidth(e.target.value);
+        });
+
+        // Marker color controls
+        document.getElementById('startMarkerColor').addEventListener('input', (e) => {
+            this.mapManager.updateActiveRouteStartMarkerColor(e.target.value);
+        });
+
+        document.getElementById('finishMarkerColor').addEventListener('input', (e) => {
+            this.mapManager.updateActiveRouteFinishMarkerColor(e.target.value);
         });
 
         // Map style change
         document.getElementById('mapStyle').addEventListener('change', (e) => {
             this.mapManager.changeMapStyle(e.target.value);
         });
-
-
 
         // Toggle markers
         document.getElementById('toggleMarkers').addEventListener('click', (e) => {
@@ -97,58 +109,235 @@ class GPXApp {
         document.querySelector('.toggle-sidebar').addEventListener('click', (e) => {
             this.handleSidebarToggle(e.target);
         });
-
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            this.mapManager.getMap().resize();
-        });
     }
 
-    async handleFileUpload(e) {
+    handleFileSelection(e) {
         const fileInput = e.target;
+        const fileList = document.getElementById('fileList');
+        const fileItems = document.getElementById('fileItems');
+        const uploadBtn = document.getElementById('uploadBtn');
         
         if (!fileInput.files.length) {
-            showToast('Please select a file', 'error');
+            fileList.classList.add('hidden');
+            uploadBtn.disabled = true;
             return;
         }
 
-        const formData = new FormData();
-        formData.append('gpx_file', fileInput.files[0]);
+        // Clear previous file items
+        fileItems.innerHTML = '';
+        
+        // Generate colors for each file
+        const colors = this.generateColors(fileInput.files.length);
+        
+        // Create file items with color selection
+        Array.from(fileInput.files).forEach((file, index) => {
+            const fileItem = this.createFileItem(file, colors[index], index);
+            fileItems.appendChild(fileItem);
+        });
+        
+        fileList.classList.remove('hidden');
+        uploadBtn.disabled = false;
+    }
+
+    createFileItem(file, defaultColor, index) {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'flex items-center space-x-3 p-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md shadow-sm';
+        fileItem.innerHTML = `
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">${file.name}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">${(file.size / 1024).toFixed(1)} KB</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <label class="text-xs text-gray-600 dark:text-gray-400">Color:</label>
+                <input type="color" 
+                       class="w-8 h-8 border border-gray-300 dark:border-gray-600 rounded cursor-pointer hover:scale-105 transition-transform"
+                       value="${defaultColor}"
+                       data-file-index="${index}">
+                <button type="button" 
+                        class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        onclick="gpxApp.removeFile(${index})"
+                        title="Remove file">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        `;
+        return fileItem;
+    }
+
+    generateColors(count) {
+        const baseColors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+            '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+        ];
+        
+        const colors = [];
+        for (let i = 0; i < count; i++) {
+            colors.push(baseColors[i % baseColors.length]);
+        }
+        return colors;
+    }
+
+    removeFile(index) {
+        const fileInput = document.getElementById('gpxFiles');
+        const dt = new DataTransfer();
+        
+        Array.from(fileInput.files).forEach((file, i) => {
+            if (i !== index) {
+                dt.items.add(file);
+            }
+        });
+        
+        fileInput.files = dt.files;
+        this.handleFileSelection({ target: fileInput });
+    }
+
+    async handleFormSubmission() {
+        const fileInput = document.getElementById('gpxFiles');
+        const uploadBtn = document.getElementById('uploadBtn');
+        
+        if (!fileInput.files.length) {
+            showToast('Please select files to upload', 'error');
+            return;
+        }
 
         // Show loading state
-        const uploadForm = fileInput.closest('form') || fileInput.closest('.controls');
-        if (uploadForm && window.loadingStates) {
-            window.loadingStates.setFormLoading(uploadForm);
+        if (window.loadingStates) {
+            window.loadingStates.setButtonLoading(uploadBtn, 'Uploading...');
         }
 
         try {
-            const response = await fetch('/upload-gpx', {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': this.csrfToken
-                },
-                body: formData
-            });
+            const files = Array.from(fileInput.files);
+            const colorInputs = document.querySelectorAll('input[type="color"]');
             
-            const data = await response.json();
-            
-            if (data.error) {
-                showToast(data.error, 'error');
-                return;
+            // Upload each file with its selected color
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const color = colorInputs[i] ? colorInputs[i].value : this.generateColors(1)[0];
+                
+                await this.uploadSingleFile(file, color);
             }
-
-            // Load the GPX data into the map
-            await this.mapManager.loadGPXData(data.track_points);
-            showToast('Route loaded successfully!', 'success');
-
+            
+            showToast(`Successfully uploaded ${files.length} route(s)!`, 'success');
+            
+            // Reset form
+            fileInput.value = '';
+            document.getElementById('fileList').classList.add('hidden');
+            uploadBtn.disabled = true;
+            
         } catch (error) {
-            showToast('Error loading GPX file: ' + error.message, 'error');
+            showToast('Error uploading files: ' + error.message, 'error');
         } finally {
             // Remove loading state
-            if (uploadForm && window.loadingStates) {
-                window.loadingStates.removeFormLoading(uploadForm);
+            if (window.loadingStates) {
+                window.loadingStates.removeButtonLoading(uploadBtn);
             }
         }
+    }
+
+    async uploadSingleFile(file, color) {
+        const formData = new FormData();
+        formData.append('gpx_file', file);
+
+        const response = await fetch('/upload-gpx', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': this.csrfToken
+            },
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Get current marker colors
+        const startMarkerColor = document.getElementById('startMarkerColor').value;
+        const finishMarkerColor = document.getElementById('finishMarkerColor').value;
+
+        // Store the route data with its color and marker colors
+        const routeId = `route_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        this.uploadedRoutes.set(routeId, {
+            trackPoints: data.track_points,
+            color: color,
+            filename: file.name,
+            startMarkerColor: startMarkerColor,
+            finishMarkerColor: finishMarkerColor
+        });
+
+        // Add the route to the map
+        await this.mapManager.addRoute(routeId, data.track_points, color, file.name);
+        
+        // Update the route management UI
+        this.updateRouteManagementUI();
+    }
+
+    updateRouteManagementUI() {
+        const routeList = document.getElementById('routeList');
+        const routes = this.mapManager.getAllRoutes();
+        
+        if (routes.size === 0) {
+            routeList.innerHTML = '<div class="text-xs text-gray-500 dark:text-gray-400 italic">No routes uploaded yet</div>';
+            return;
+        }
+        
+        routeList.innerHTML = '';
+        
+        routes.forEach((route, routeId) => {
+            const routeItem = this.createRouteItem(routeId, route);
+            routeList.appendChild(routeItem);
+        });
+    }
+
+    createRouteItem(routeId, route) {
+        const routeItem = document.createElement('div');
+        const isActive = routeId === this.mapManager.activeRouteId;
+        
+        routeItem.className = `flex items-center justify-between p-2 rounded-md border ${
+            isActive 
+                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-700' 
+                : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600'
+        }`;
+        
+        routeItem.innerHTML = `
+            <div class="flex items-center space-x-2 flex-1 min-w-0">
+                <div class="w-3 h-3 rounded-full" style="background-color: ${route.color}"></div>
+                <span class="text-xs font-medium text-gray-900 dark:text-white truncate">${route.filename}</span>
+                ${isActive ? '<span class="text-xs text-blue-600 dark:text-blue-400">(Active)</span>' : ''}
+            </div>
+            <div class="flex items-center space-x-1">
+                <div class="flex items-center space-x-1 mr-2">
+                    <div class="w-2 h-2 rounded-full" style="background-color: ${route.startMarkerColor}" title="Start marker"></div>
+                    <div class="w-2 h-2 rounded-full" style="background-color: ${route.finishMarkerColor}" title="Finish marker"></div>
+                </div>
+                <button type="button" 
+                        class="text-xs px-2 py-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
+                        onclick="gpxApp.selectRoute('${routeId}')">
+                    Select
+                </button>
+                <button type="button" 
+                        class="text-xs px-2 py-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                        onclick="gpxApp.removeRoute('${routeId}')">
+                    Remove
+                </button>
+            </div>
+        `;
+        
+        return routeItem;
+    }
+
+    selectRoute(routeId) {
+        this.mapManager.setActiveRoute(routeId);
+        this.updateRouteManagementUI();
+    }
+
+    removeRoute(routeId) {
+        this.mapManager.removeRoute(routeId);
+        this.uploadedRoutes.delete(routeId);
+        this.updateRouteManagementUI();
     }
 
     handleMarkersToggle(button) {
