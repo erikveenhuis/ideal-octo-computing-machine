@@ -2,29 +2,29 @@
 # Install with: pip install -r requirements-dev.txt
 
 # Code Quality
-pylint>=3.3.0
-black>=23.0.0
-isort>=5.12.0
-flake8>=6.0.0
+pylint>=3.3.7
+black>=25.1.0
+isort>=6.0.1
+flake8>=7.3.0
 
 # Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-mock>=3.11.0
-requests-mock>=1.11.0
+pytest>=8.4.1
+pytest-cov>=6.2.1
+pytest-mock>=3.14.1
+requests-mock>=1.12.1
 
 # Documentation
-sphinx>=7.1.0
-sphinx-rtd-theme>=1.3.0
+sphinx>=8.2.3
+sphinx-rtd-theme>=3.0.2
 
 # Type Checking
-mypy>=1.5.0
-types-requests>=2.31.0
+mypy>=1.17.1
+types-requests>=2.32.4.20250611
 
 # Security
-bandit>=1.7.5
-safety>=2.3.0
+bandit>=1.8.6
+safety>=3.6.0
 
 # Development Tools
-pre-commit>=3.4.0
-pip-tools>=7.3.0 
+pre-commit>=4.2.0
+pip-tools>=7.5.0 

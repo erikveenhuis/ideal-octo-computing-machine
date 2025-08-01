@@ -151,7 +151,7 @@ class GPXMapManager {
             paint: {
                 'line-color': color,
                 'line-width': parseInt(document.getElementById('routeWidth').value, 10),
-                'line-opacity': 0.7
+                'line-opacity': 1.0
             }
         };
 
@@ -175,10 +175,14 @@ class GPXMapManager {
             this.setActiveRoute(routeId);
         }
 
-        // Add markers if enabled and this is the first route
-        if (this.showMarkers && this.routes.size === 1) {
+        // Add markers if enabled (for any route, not just the first one)
+        // Markers are added after routes so they appear on top
+        if (this.showMarkers) {
             this.createMarkers(coordinates, routeId);
         }
+
+        // Ensure markers are always on top after adding routes
+        this.ensureMarkersOnTop();
 
         // Fit bounds to all routes
         this.fitBoundsToAllRoutes();
@@ -236,17 +240,27 @@ class GPXMapManager {
                 this.setActiveRoute(firstRouteId || null);
             }
             
-            // Update markers if no routes left
+            // Update markers
             if (this.routes.size === 0) {
+                // Remove all markers if no routes left
                 if (this.map.getSource('markers')) {
+                    this.map.removeLayer('marker-labels');
                     this.map.removeLayer('marker-circles');
                     this.map.removeSource('markers');
                 }
                 this.markersSource = null;
-            } else {
-                // Fit bounds to remaining routes
-                this.fitBoundsToAllRoutes();
+            } else if (this.showMarkers) {
+                // Remove markers for this specific route and recreate markers for remaining routes
+                if (this.markersSource) {
+                    this.markersSource.data.features = this.markersSource.data.features.filter(
+                        feature => feature.properties['route-id'] !== routeId
+                    );
+                    this.addMarkersToMap();
+                }
             }
+            
+            // Fit bounds to remaining routes
+            this.fitBoundsToAllRoutes();
             
             // Trigger UI update if gpxApp exists
             if (window.gpxApp && window.gpxApp.updateRouteManagementUI) {
@@ -261,39 +275,49 @@ class GPXMapManager {
         const route = this.routes.get(routeId);
         if (!route) return;
         
-        // Create GeoJSON for markers
-        this.markersSource = {
-            type: 'geojson',
-            data: {
-                type: 'FeatureCollection',
-                features: [
-                    {
-                        type: 'Feature',
-                        properties: {
-                            'marker-symbol': 'S',
-                            'marker-color': route.startMarkerColor,
-                            'route-id': routeId
-                        },
-                        geometry: {
-                            type: 'Point',
-                            coordinates: coordinates[0]
-                        }
-                    },
-                    {
-                        type: 'Feature',
-                        properties: {
-                            'marker-symbol': 'F',
-                            'marker-color': route.finishMarkerColor,
-                            'route-id': routeId
-                        },
-                        geometry: {
-                            type: 'Point',
-                            coordinates: coordinates[coordinates.length - 1]
-                        }
-                    }
-                ]
+        // If markers source doesn't exist, create it
+        if (!this.markersSource) {
+            this.markersSource = {
+                type: 'geojson',
+                data: {
+                    type: 'FeatureCollection',
+                    features: []
+                }
+            };
+        }
+        
+        // Remove existing markers for this route
+        this.markersSource.data.features = this.markersSource.data.features.filter(
+            feature => feature.properties['route-id'] !== routeId
+        );
+        
+        // Add new markers for this route
+        this.markersSource.data.features.push(
+            {
+                type: 'Feature',
+                properties: {
+                    'marker-symbol': 'S',
+                    'marker-color': route.startMarkerColor,
+                    'route-id': routeId
+                },
+                geometry: {
+                    type: 'Point',
+                    coordinates: coordinates[0]
+                }
+            },
+            {
+                type: 'Feature',
+                properties: {
+                    'marker-symbol': 'F',
+                    'marker-color': route.finishMarkerColor,
+                    'route-id': routeId
+                },
+                geometry: {
+                    type: 'Point',
+                    coordinates: coordinates[coordinates.length - 1]
+                }
             }
-        };
+        );
 
         this.addMarkersToMap();
     }
@@ -301,20 +325,47 @@ class GPXMapManager {
     addMarkersToMap() {
         if (!this.markersSource) return;
         
-        // Add markers source and layer
-        this.map.addSource('markers', this.markersSource);
+        // Add markers source if it doesn't exist
+        if (!this.map.getSource('markers')) {
+            this.map.addSource('markers', this.markersSource);
+            
+            // Add circle background layer with subtle glow
+            this.map.addLayer({
+                id: 'marker-circles',
+                type: 'circle',
+                source: 'markers',
+                paint: {
+                    'circle-radius': 10,
+                    'circle-color': ['get', 'marker-color'],
+                    'circle-opacity': 1.0
+                }
+            });
+            
+            // Add text labels for start/finish markers
+            this.map.addLayer({
+                id: 'marker-labels',
+                type: 'symbol',
+                source: 'markers',
+                layout: {
+                    'text-field': ['get', 'marker-symbol'],
+                    'text-size': 12,
+                    'text-font': ['Open Sans Bold'],
+                    'text-offset': [0, 0],
+                    'text-anchor': 'center'
+                },
+                paint: {
+                    'text-color': '#ffffff',
+                    'text-halo-color': '#000000',
+                    'text-halo-width': 1
+                }
+            });
+        } else {
+            // Update existing markers source
+            this.map.getSource('markers').setData(this.markersSource.data);
+        }
         
-        // Add circle background layer with subtle glow
-        this.map.addLayer({
-            id: 'marker-circles',
-            type: 'circle',
-            source: 'markers',
-            paint: {
-                'circle-radius': 10,
-                'circle-color': ['get', 'marker-color'],
-                'circle-opacity': 0.8
-            }
-        });
+        // Ensure marker layers are always on top by moving them to the end
+        this.ensureMarkersOnTop();
     }
 
     fitBoundsToAllRoutes() {
@@ -417,15 +468,17 @@ class GPXMapManager {
         this.showMarkers = show;
         
         if (show && this.routes.size > 0) {
-            // Show markers for the active route, or first route if no active route
-            const routeId = this.activeRouteId || this.routes.keys().next().value;
-            const route = this.routes.get(routeId);
-            if (route) {
+            // Show markers for all routes
+            // Markers will be added after all routes, ensuring they appear on top
+            this.routes.forEach((route, routeId) => {
                 this.createMarkers(route.coordinates, routeId);
-            }
+            });
+            // Ensure markers are on top after toggling
+            this.ensureMarkersOnTop();
         } else {
             // Remove markers
             if (this.map.getSource('markers')) {
+                this.map.removeLayer('marker-labels');
                 this.map.removeLayer('marker-circles');
                 this.map.removeSource('markers');
             }
@@ -436,6 +489,16 @@ class GPXMapManager {
     toggleAntialiasing(enabled) {
         this.antialiasing = enabled;
         // Note: Mapbox GL JS handles antialiasing automatically
+    }
+
+    ensureMarkersOnTop() {
+        // Move marker layers to the top of the layer stack
+        if (this.map.getLayer('marker-circles')) {
+            this.map.moveLayer('marker-circles');
+        }
+        if (this.map.getLayer('marker-labels')) {
+            this.map.moveLayer('marker-labels');
+        }
     }
 
     getMap() {

@@ -17,6 +17,9 @@ class GPXApp {
 
         // Initialize form validation
         this.initializeFormValidation();
+        
+        // Initialize toggle button states
+        this.initializeToggleStates();
     }
 
     initializeFormValidation() {
@@ -305,7 +308,7 @@ class GPXApp {
         routeItem.innerHTML = `
             <div class="flex items-center space-x-2 flex-1 min-w-0">
                 <div class="w-3 h-3 rounded-full" style="background-color: ${route.color}"></div>
-                <span class="text-xs font-medium text-gray-900 dark:text-white truncate">${route.filename}</span>
+                <span class="text-xs font-medium text-gray-900 dark:text-white break-all" title="${route.filename}">${route.filename}</span>
                 ${isActive ? '<span class="text-xs text-blue-600 dark:text-blue-400">(Active)</span>' : ''}
             </div>
             <div class="flex items-center space-x-1">
@@ -342,42 +345,52 @@ class GPXApp {
 
     handleMarkersToggle(button) {
         const isEnabled = !button.classList.contains('bg-gray-200');
+        const newState = !isEnabled;
         
-        button.classList.toggle('bg-blue-600');
-        button.classList.toggle('bg-gray-200');
-        button.classList.toggle('dark:bg-blue-700');
-        button.classList.toggle('dark:bg-gray-700');
-        
-        const span = button.querySelector('span');
-        if (!isEnabled) {
-            span.classList.remove('translate-x-0');
-            span.classList.add('translate-x-5');
+        if (newState) {
+            button.classList.remove('bg-gray-200', 'dark:bg-gray-700');
+            button.classList.add('bg-blue-600', 'dark:bg-blue-700');
+            const span = button.querySelector('span');
+            if (span) {
+                span.classList.remove('translate-x-0');
+                span.classList.add('translate-x-5');
+            }
         } else {
-            span.classList.remove('translate-x-5');
-            span.classList.add('translate-x-0');
+            button.classList.remove('bg-blue-600', 'dark:bg-blue-700');
+            button.classList.add('bg-gray-200', 'dark:bg-gray-700');
+            const span = button.querySelector('span');
+            if (span) {
+                span.classList.remove('translate-x-5');
+                span.classList.add('translate-x-0');
+            }
         }
         
-        this.mapManager.toggleMarkers(!isEnabled);
+        this.mapManager.toggleMarkers(newState);
     }
 
     handleAntialiasingToggle(button) {
         const isEnabled = !button.classList.contains('bg-gray-200');
+        const newState = !isEnabled;
         
-        button.classList.toggle('bg-blue-600');
-        button.classList.toggle('bg-gray-200');
-        button.classList.toggle('dark:bg-blue-700');
-        button.classList.toggle('dark:bg-gray-700');
-        
-        const span = button.querySelector('span');
-        if (!isEnabled) {
-            span.classList.remove('translate-x-0');
-            span.classList.add('translate-x-6');
+        if (newState) {
+            button.classList.remove('bg-gray-200', 'dark:bg-gray-700');
+            button.classList.add('bg-blue-600', 'dark:bg-blue-700');
+            const span = button.querySelector('span');
+            if (span) {
+                span.classList.remove('translate-x-0');
+                span.classList.add('translate-x-6');
+            }
         } else {
-            span.classList.remove('translate-x-6');
-            span.classList.add('translate-x-0');
+            button.classList.remove('bg-blue-600', 'dark:bg-blue-700');
+            button.classList.add('bg-gray-200', 'dark:bg-gray-700');
+            const span = button.querySelector('span');
+            if (span) {
+                span.classList.remove('translate-x-6');
+                span.classList.add('translate-x-0');
+            }
         }
         
-        this.mapManager.toggleAntialiasing(!isEnabled);
+        this.mapManager.toggleAntialiasing(newState);
     }
 
 
@@ -444,5 +457,53 @@ class GPXApp {
         setTimeout(() => {
             this.mapManager.getMap().resize();
         }, 300);
+    }
+
+    initializeToggleStates() {
+        // Initialize markers toggle button state
+        const markersToggle = document.getElementById('toggleMarkers');
+        if (markersToggle) {
+            // Set initial state based on mapManager.showMarkers
+            if (this.mapManager.showMarkers) {
+                markersToggle.classList.remove('bg-gray-200', 'dark:bg-gray-700');
+                markersToggle.classList.add('bg-blue-600', 'dark:bg-blue-700');
+                const span = markersToggle.querySelector('span');
+                if (span) {
+                    span.classList.remove('translate-x-0');
+                    span.classList.add('translate-x-5');
+                }
+            } else {
+                markersToggle.classList.remove('bg-blue-600', 'dark:bg-blue-700');
+                markersToggle.classList.add('bg-gray-200', 'dark:bg-gray-700');
+                const span = markersToggle.querySelector('span');
+                if (span) {
+                    span.classList.remove('translate-x-5');
+                    span.classList.add('translate-x-0');
+                }
+            }
+        }
+        
+        // Initialize antialiasing toggle button state
+        const antialiasingToggle = document.getElementById('toggleAntialiasing');
+        if (antialiasingToggle) {
+            // Set initial state based on mapManager.antialiasing
+            if (this.mapManager.antialiasing) {
+                antialiasingToggle.classList.remove('bg-gray-200', 'dark:bg-gray-700');
+                antialiasingToggle.classList.add('bg-blue-600', 'dark:bg-blue-700');
+                const span = antialiasingToggle.querySelector('span');
+                if (span) {
+                    span.classList.remove('translate-x-0');
+                    span.classList.add('translate-x-6');
+                }
+            } else {
+                antialiasingToggle.classList.remove('bg-blue-600', 'dark:bg-blue-700');
+                antialiasingToggle.classList.add('bg-gray-200', 'dark:bg-gray-700');
+                const span = antialiasingToggle.querySelector('span');
+                if (span) {
+                    span.classList.remove('translate-x-6');
+                    span.classList.add('translate-x-0');
+                }
+            }
+        }
     }
 } 

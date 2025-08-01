@@ -117,8 +117,8 @@ class ResourceOptimizer {
      */
     async preloadMapboxResources() {
         const resources = [
-            'https://api.mapbox.com/mapbox-gl-js/v3.13.0/mapbox-gl.css',
-            'https://api.mapbox.com/mapbox-gl-js/v3.13.0/mapbox-gl.js'
+            'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.css',
+            'https://api.mapbox.com/mapbox-gl-js/v3.14.0/mapbox-gl.js'
         ];
 
         return this.preloadResources(resources);
