@@ -193,7 +193,7 @@ class GPXApp {
 
     generateColors(count) {
         const baseColors = [
-            '#357273', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+            '#357273', '#83c3c2', '#45B7D1', '#96CEB4', '#FFEAA7',
             '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
         ];
         
