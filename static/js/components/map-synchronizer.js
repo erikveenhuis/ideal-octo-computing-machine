@@ -63,7 +63,7 @@ class MapSynchronizer {
             preserveDrawingBuffer: true,
             fadeDuration: 0,
             interactive: false,
-            antialias: this.mapManager.antialiasing,
+            antialias: true, // Always enable antialiasing for exports
             failIfMajorPerformanceCaveat: false,
             pixelRatio: effectivePixelRatio,
             attributionControl: false,

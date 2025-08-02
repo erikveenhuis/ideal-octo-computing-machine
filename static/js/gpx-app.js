@@ -118,10 +118,7 @@ class GPXApp {
 
         // Global marker toggle removed - now handled per route
 
-        // Toggle antialiasing
-        document.getElementById('toggleAntialiasing').addEventListener('click', (e) => {
-            this.handleAntialiasingToggle(e.target);
-        });
+        // Anti-aliasing toggle removed - was non-functional for main map display
 
         // Save PNG button
         document.getElementById('savePNGBtn').addEventListener('click', () => {
@@ -417,30 +414,7 @@ class GPXApp {
         this.updateRouteManagementUI();
     }
 
-    handleAntialiasingToggle(button) {
-        const isEnabled = !button.classList.contains('bg-gray-200');
-        const newState = !isEnabled;
-        
-        if (newState) {
-            button.classList.remove('bg-gray-200', 'dark:bg-gray-700');
-            button.classList.add('bg-blue-600', 'dark:bg-blue-700');
-            const span = button.querySelector('span');
-            if (span) {
-                span.classList.remove('translate-x-0');
-                span.classList.add('translate-x-6');
-            }
-        } else {
-            button.classList.remove('bg-blue-600', 'dark:bg-blue-700');
-            button.classList.add('bg-gray-200', 'dark:bg-gray-700');
-            const span = button.querySelector('span');
-            if (span) {
-                span.classList.remove('translate-x-6');
-                span.classList.add('translate-x-0');
-            }
-        }
-        
-        this.mapManager.toggleAntialiasing(newState);
-    }
+    // Anti-aliasing toggle method removed - was non-functional for main map display
 
 
 
@@ -532,27 +506,6 @@ class GPXApp {
             }
         }
         
-        // Initialize antialiasing toggle button state
-        const antialiasingToggle = document.getElementById('toggleAntialiasing');
-        if (antialiasingToggle) {
-            // Set initial state based on mapManager.antialiasing
-            if (this.mapManager.antialiasing) {
-                antialiasingToggle.classList.remove('bg-gray-200', 'dark:bg-gray-700');
-                antialiasingToggle.classList.add('bg-blue-600', 'dark:bg-blue-700');
-                const span = antialiasingToggle.querySelector('span');
-                if (span) {
-                    span.classList.remove('translate-x-0');
-                    span.classList.add('translate-x-6');
-                }
-            } else {
-                antialiasingToggle.classList.remove('bg-blue-600', 'dark:bg-blue-700');
-                antialiasingToggle.classList.add('bg-gray-200', 'dark:bg-gray-700');
-                const span = antialiasingToggle.querySelector('span');
-                if (span) {
-                    span.classList.remove('translate-x-6');
-                    span.classList.add('translate-x-0');
-                }
-            }
-        }
+        // Anti-aliasing toggle initialization removed - was non-functional for main map display
     }
 } 

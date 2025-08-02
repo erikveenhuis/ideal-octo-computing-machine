@@ -7,7 +7,6 @@ class GPXMapManager {
         this.activeRouteId = null; // Currently selected route for editing
         this.markersSource = null;
         this.showMarkers = true;
-        this.antialiasing = true;
         
         // Set the access token
         mapboxgl.accessToken = mapboxAccessToken;
@@ -530,10 +529,7 @@ class GPXMapManager {
         }
     }
 
-    toggleAntialiasing(enabled) {
-        this.antialiasing = enabled;
-        // Note: Mapbox GL JS handles antialiasing automatically
-    }
+    // Anti-aliasing toggle method removed - was non-functional for main map display
 
     ensureMarkersOnTop() {
         // Move marker layers to the top of the layer stack
