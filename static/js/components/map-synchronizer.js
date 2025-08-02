@@ -340,7 +340,7 @@ class MapSynchronizer {
                     paint: {
                         'circle-radius': scaledCircleRadius,
                         'circle-color': ['get', 'marker-color'],
-                        'circle-opacity': 0.8 // Match canvas marker opacity
+                        'circle-opacity': 1.0 // Fully opaque markers
                     }
                 });
                 
@@ -356,7 +356,8 @@ class MapSynchronizer {
                         'icon-image': 'none'
                     },
                     paint: {
-                        'text-color': '#ffffff'
+                        'text-color': '#ffffff',
+                        'text-opacity': 1.0
                     }
                 });
                 

@@ -474,7 +474,7 @@ class FeatureConverter {
             
             // Apply same opacity override as canvas for markers
             if (isMarkerFeature) {
-                circleOpacity = 0.8; // Match canvas marker opacity
+                circleOpacity = 1.0; // Fully opaque markers
             }
             
             let text = ExportUtilities.evaluateExpression(layout['text-field'], properties);
@@ -603,8 +603,8 @@ class FeatureConverter {
             }
             if (textColor) textElement += ` fill="${textColor}"`;
             if (textOpacity !== undefined) {
-                // Use slightly softer opacity for marker text
-                const markerOpacity = isMarkerFeature ? '0.95' : textOpacity;
+                // Use fully opaque text for marker text
+                const markerOpacity = isMarkerFeature ? '1.0' : textOpacity;
                 textElement += ` fill-opacity="${markerOpacity}"`;
             }
             
@@ -639,7 +639,7 @@ class FeatureConverter {
                 const markerRadius = 10;
                 
                 return `<g class="marker">
-    <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${markerRadius}" fill="${markerColor}" fill-opacity="0.8"/>
+    <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${markerRadius}" fill="${markerColor}" fill-opacity="1.0"/>
     ${textElement}
 </g>`;
             }
@@ -655,7 +655,7 @@ class FeatureConverter {
             
             // Apply same opacity override as canvas for markers
             if (isMarkerFeature) {
-                opacity = 0.8; // Match canvas marker opacity
+                opacity = 1.0; // Fully opaque markers
             }
             
             // ENHANCED: For marker features, also add the symbol text on top of the circle
@@ -684,7 +684,7 @@ class FeatureConverter {
           font-size="${fontSize}"
           font-weight="600"
           fill="${textColor}"
-          fill-opacity="0.95">${text}</text>
+          fill-opacity="1.0">${text}</text>
 </g>`;
             }
             

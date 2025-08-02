@@ -356,7 +356,8 @@ class GPXMapManager {
                 paint: {
                     'text-color': '#ffffff',
                     'text-halo-color': '#000000',
-                    'text-halo-width': 1
+                    'text-halo-width': 1,
+                    'text-opacity': 1.0
                 }
             });
         } else {
