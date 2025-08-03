@@ -142,6 +142,11 @@ class GPXApp {
         const fileItems = document.getElementById('fileItems');
         const uploadBtn = document.getElementById('uploadBtn');
         
+        // Trigger form validation to update the field state
+        if (this.uploadFormId && window.formValidator) {
+            window.formValidator.validateField(this.uploadFormId, 'gpxFiles');
+        }
+        
         if (!fileInput.files.length) {
             fileList.classList.add('hidden');
             uploadBtn.disabled = true;
@@ -250,6 +255,11 @@ class GPXApp {
             fileInput.value = '';
             document.getElementById('fileList').classList.add('hidden');
             uploadBtn.disabled = true;
+            
+            // Clear validation state to remove any error messages
+            if (this.uploadFormId && window.formValidator) {
+                window.formValidator.clearFieldValidation(this.uploadFormId, 'gpxFiles');
+            }
             
         } catch (error) {
             showToast('Error uploading files: ' + error.message, 'error');

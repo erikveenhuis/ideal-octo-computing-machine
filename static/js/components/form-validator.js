@@ -171,6 +171,23 @@ class FormValidator {
     }
 
     /**
+     * Clear validation for a specific field
+     * @param {string} formId - Form identifier
+     * @param {string} fieldName - Field name
+     */
+    clearFieldValidation(formId, fieldName) {
+        const validator = this.validators.get(formId);
+        if (!validator) return;
+
+        const fieldData = validator.fields.get(fieldName);
+        if (fieldData) {
+            fieldData.isValid = false;
+            fieldData.errors = [];
+            this.clearFieldUI(fieldData.element);
+        }
+    }
+
+    /**
      * Set up form event listeners
      * @private
      */
@@ -205,6 +222,19 @@ class FormValidator {
                 field._validationTimeout = setTimeout(() => {
                     this.validateField(formId, fieldName);
                 }, 300);
+            });
+        }
+        
+        // Always validate file inputs on change
+        if (field.type === 'file') {
+            field.addEventListener('change', () => {
+                // Don't validate if the field was programmatically cleared (no files selected)
+                if (field.files.length === 0 && field.value === '') {
+                    // This is likely a programmatic clear, don't show validation errors
+                    this.clearFieldValidation(formId, fieldName);
+                    return;
+                }
+                this.validateField(formId, fieldName);
             });
         }
     }
@@ -319,6 +349,9 @@ class FormValidator {
         if (element.type === 'checkbox' || element.type === 'radio') {
             return element.checked;
         }
+        if (element.type === 'file') {
+            return element.files.length > 0 ? element.files : null;
+        }
         return element.value.trim();
     }
 
@@ -350,6 +383,7 @@ class FormValidator {
             required: {
                 validate: (value) => {
                     if (typeof value === 'boolean') return value;
+                    if (value && value.length !== undefined) return value.length > 0; // Handle FileList
                     return value !== null && value !== undefined && value !== '';
                 }
             },
