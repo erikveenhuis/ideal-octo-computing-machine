@@ -40,17 +40,11 @@ class MapSynchronizer {
         const originalWidth = originalCanvas.width;
         const originalHeight = originalCanvas.height;
         
-        // Calculate zoom adjustment based on actual canvas size difference
-        // We need to zoom in more when the canvas is larger to show the same area
-        const widthRatio = canvasSettings.exportCanvasWidth / originalWidth;
-        const heightRatio = canvasSettings.exportCanvasHeight / originalHeight;
-        const avgRatio = Math.sqrt(widthRatio * heightRatio); // Geometric mean for balanced scaling
+        // Use exact same zoom level as the original map - no adjustment needed
+        const adjustedZoom = currentState.zoom;
         
-        const zoomAdjustment = Math.log2(avgRatio);
-        const adjustedZoom = currentState.zoom + zoomAdjustment;
-        
-        console.log(`Canvas size comparison: ${originalWidth}x${originalHeight} → ${canvasSettings.exportCanvasWidth}x${canvasSettings.exportCanvasHeight}`);
-        console.log(`Zoom adjustment: ${currentState.zoom.toFixed(3)} → ${adjustedZoom.toFixed(3)} (adjustment: +${zoomAdjustment.toFixed(3)})`);
+        console.log(`Canvas size: ${originalWidth}x${originalHeight} (exact match)`);
+        console.log(`Using exact same zoom level: ${currentState.zoom.toFixed(3)} (no adjustment needed)`);
         
         // Create temporary map with improved scaling for text rendering
         const exportMap = new mapboxgl.Map({
@@ -86,8 +80,8 @@ class MapSynchronizer {
         exportMap.on('style.load', () => {
             console.log('Preserving original style appearance for export');
             
-            // Calculate conservative text scaling factor to maintain original appearance
-            const textScaleFactor = Math.min(avgRatio * 0.8, 2.0); // More conservative scaling
+            // No text scaling needed since we're using exact same canvas size
+            const textScaleFactor = 1.0;
             
             // Wait a moment for the original map to be fully rendered
             setTimeout(() => {
@@ -252,18 +246,8 @@ class MapSynchronizer {
         
         console.log('Using exact center match:', exactCenter);
         
-        // Calculate the same zoom adjustment as in createExportMap
-        const originalMap = this.mapManager.getMap();
-        const originalCanvas = originalMap.getCanvas();
-        const originalWidth = originalCanvas.width;
-        const originalHeight = originalCanvas.height;
-        
-        const widthRatio = canvasSettings.exportCanvasWidth / originalWidth;
-        const heightRatio = canvasSettings.exportCanvasHeight / originalHeight;
-        const avgRatio = Math.sqrt(widthRatio * heightRatio);
-        
-        const zoomAdjustment = Math.log2(avgRatio);
-        const adjustedZoom = currentState.zoom + zoomAdjustment;
+        // Use exact same zoom level as the original map - no adjustment needed
+        const adjustedZoom = currentState.zoom;
         
         exportMap.setCenter(exactCenter);
         exportMap.setZoom(adjustedZoom);
@@ -299,15 +283,10 @@ class MapSynchronizer {
         if (routeData.routeSource && routeData.routeLayer) {
             console.log('Synchronizing route data to export map with scaled styling');
             
-            // Calculate scaling factor for styling adjustments
-            const originalMap = this.mapManager.getMap();
-            const originalCanvas = originalMap.getCanvas();
-            const scalingFactor = Math.sqrt(
-                (canvasSettings.exportCanvasWidth / originalCanvas.width) * 
-                (canvasSettings.exportCanvasHeight / originalCanvas.height)
-            );
+            // No scaling factor needed since we're using exact same canvas size
+            const scalingFactor = 1.0;
             
-            console.log(`Applying style scaling factor: ${scalingFactor.toFixed(2)}`);
+            console.log(`No style scaling applied (1:1 match)`);
             
             if (!exportMap.getSource('route')) {
                 exportMap.addSource('route', routeData.routeSource);

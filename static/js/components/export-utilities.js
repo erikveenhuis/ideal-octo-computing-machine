@@ -29,7 +29,7 @@ class ExportUtilities {
     }
 
     static getCanvasSettings(settings, dpi) {
-        // FIXED: Use actual map canvas dimensions instead of fixed print dimensions
+        // Use exact same canvas dimensions as the on-screen map
         // Get the actual map canvas dimensions from the current map
         const map = window.gpxApp?.mapManager?.getMap();
         let actualCanvasWidth = 850;  // Default fallback
@@ -41,12 +41,12 @@ class ExportUtilities {
             actualCanvasHeight = canvas.height;
         }
         
-        // Use the predefined scaling factor for large offscreen canvas
-        const scalingFactor = settings.scalingFactor;
-        const exportCanvasWidth = Math.round(actualCanvasWidth * scalingFactor);
-        const exportCanvasHeight = Math.round(actualCanvasHeight * scalingFactor);
+        // Use 1:1 scaling - no enlargement
+        const scalingFactor = 1.0;
+        const exportCanvasWidth = actualCanvasWidth;
+        const exportCanvasHeight = actualCanvasHeight;
         
-        console.log(`Canvas settings - Actual: ${actualCanvasWidth}x${actualCanvasHeight}, Export: ${exportCanvasWidth}x${exportCanvasHeight}, Scaling: ${scalingFactor}x`);
+        console.log(`Canvas settings - Exact match: ${actualCanvasWidth}x${actualCanvasHeight}, No scaling applied`);
         
         return {
             exportCanvasWidth,

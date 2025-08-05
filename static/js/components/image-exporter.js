@@ -20,55 +20,36 @@ class ImageExporter {
             const settings = exportSettings;
             const dpi = settings.dpi;
             
-            showToast(`🗺️ Preparing high-quality PNG export (${dpi} DPI)...`, 'success');
+            showToast(`🗺️ Capturing your route as PNG...`, 'success');
             
             const map = this.mapManager.getMap();
             
             // Wait for map to be completely loaded and styled
             await ExportUtilities.waitForMapReady(map);
             
-            showToast('📷 Capturing your route in high resolution...', 'success');
+            showToast('📷 Capturing your current view...', 'success');
             
             // Additional delay to ensure all rendering is complete
             await new Promise(resolve => setTimeout(resolve, 500));
             
-            // Calculate export canvas settings
-            const canvasSettings = ExportUtilities.getCanvasSettings(settings, dpi);
+            // Get the canvas directly from the current map
+            const canvas = map.getCanvas();
             
-            // Store current map state
-            const currentState = ExportUtilities.getCurrentMapState(map);
+            if (!canvas) {
+                throw new Error('Map canvas not available');
+            }
             
-            console.log('Capturing state - Center:', currentState.center, 'Zoom:', currentState.zoom);
+            console.log(`Capturing canvas: ${canvas.width}x${canvas.height}`);
             
-            // Create export map
-            const { exportMap, exportContainer } = await this.mapSynchronizer.createExportMap(canvasSettings, currentState, settings);
+            showToast('🖨️ Creating your PNG file...', 'success');
             
-            // Wait for export map to be ready and synchronized
-            await this.mapSynchronizer.synchronizeExportMap(exportMap, currentState, canvasSettings);
-            
-            // Add route data to export map with scaled styling
-            await this.mapSynchronizer.addRouteDataToExportMap(exportMap, canvasSettings);
-            
-            // Final rendering stabilization
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Verify export readiness
-            ExportUtilities.verifyExportReadiness(exportMap, currentState, canvasSettings);
-            this.mapSynchronizer.verifyStyleConsistency(exportMap, this.mapManager.getMap());
-            
-            showToast('🖨️ Creating your high-quality print (this may take a moment)...', 'success');
-            
-            // Export the image
-            const blob = await this.exportToBlob(exportMap, canvasSettings, settings, dpi);
-            
-            // Clean up
-            exportMap.remove();
-            document.body.removeChild(exportContainer);
+            // Convert canvas directly to blob
+            const blob = await this.canvasToBlob(canvas, dpi);
             
             // Download the file
             this.downloadBlob(blob, dpi);
             
-            showToast(`✅ Success! Your PNG route is ready to print at ${dpi} DPI high quality`, 'success', 4000);
+            showToast(`✅ Success! Your PNG route is ready`, 'success', 4000);
             
         } catch (error) {
             console.error(`Error during PNG export:`, error);
@@ -76,13 +57,7 @@ class ImageExporter {
         }
     }
 
-    async exportToBlob(exportMap, canvasSettings, settings, dpi) {
-        const canvas = exportMap.getCanvas();
-        
-        if (!canvas) {
-            throw new Error('Map canvas not available');
-        }
-        
+    async canvasToBlob(canvas, dpi) {
         // Test canvas export
         const testDataUrl = canvas.toDataURL('image/png');
         if (testDataUrl.length < 1000) {
@@ -90,44 +65,11 @@ class ImageExporter {
         }
         
         console.log('Canvas export test successful - canvas has content');
-        console.log(`High-res canvas size: ${canvas.width}x${canvas.height}`);
+        console.log(`Canvas size: ${canvas.width}x${canvas.height}`);
         
-        // Check if pica is available
-        if (typeof pica === 'undefined') {
-            throw new Error('Pica library not loaded. Please refresh the page.');
-        }
-        
-        // Create final board-sized canvas
-        const boardCanvas = document.createElement('canvas');
-        boardCanvas.width = canvasSettings.finalWidth;
-        boardCanvas.height = canvasSettings.finalHeight;
-        
-        // Get sharpness setting
-        const currentSharpness = getExportSharpness();
-        
-        // Calculate scaling ratio for sharpening adjustments
-        const scalingRatio = canvasSettings.finalWidth / canvas.width;
-        console.log(`Scaling ratio: ${scalingRatio.toFixed(3)} (from ${canvas.width}x${canvas.height} to ${canvasSettings.finalWidth}x${canvasSettings.finalHeight})`);
-        
-        // Adjust sharpening based on scaling ratio - less sharpening needed for smaller scaling
-        const adjustedSharpness = scalingRatio > 0.8 ? currentSharpness : Math.max(currentSharpness * 0.7, 50);
-        const adjustedRadius = scalingRatio > 0.8 ? 0.8 : 0.6;
-        
-        console.log(`Applying sharpening - Original: ${currentSharpness}, Adjusted: ${adjustedSharpness.toFixed(0)}, Radius: ${adjustedRadius}`);
-        
-        // Scale to final print size with optimized settings
-        await pica().resize(canvas, boardCanvas, {
-            quality: 3,
-            alpha: true,
-            unsharpAmount: adjustedSharpness,
-            unsharpRadius: adjustedRadius,
-            unsharpThreshold: 1,
-            transferable: true
-        });
-        
-        // Convert to blob with DPI metadata
+        // Convert canvas directly to blob with DPI metadata
         return new Promise(resolve => {
-            boardCanvas.toBlob(async (blob) => {
+            canvas.toBlob(async (blob) => {
                 try {
                     const arrayBuffer = await blob.arrayBuffer();
                     const uint8Array = new Uint8Array(arrayBuffer);
