@@ -88,11 +88,14 @@ class GPXMapManager {
     }
 
     handleStyleDataChange() {
-        // When a new style is loaded, re-add the route and markers if they exist
-        if (this.routeSource && !this.map.getSource('route')) {
-            this.map.addSource('route', this.routeSource);
-            this.map.addLayer(this.routeLayer);
-        }
+        // When a new style is loaded, re-add all routes and markers if they exist
+        this.routes.forEach((route, routeId) => {
+            if (!this.map.getSource(routeId)) {
+                this.map.addSource(routeId, route.source);
+                this.map.addLayer(route.layer);
+            }
+        });
+        
         if (this.showMarkers && this.markersSource && !this.map.getSource('markers')) {
             this.addMarkersToMap();
         }
