@@ -163,14 +163,20 @@ class GPXMapManager {
             filename: filename,
             startMarkerColor: document.getElementById('startMarkerColor').value,
             finishMarkerColor: document.getElementById('finishMarkerColor').value,
-            showMarkers: true // Default to showing markers
+            showStartMarker: true, // Default to showing start marker
+            showFinishMarker: true // Default to showing finish marker
         });
         
-        // Sync showMarkers state from uploadedRoutes if available
+        // Sync marker states from uploadedRoutes if available
         if (window.gpxApp && window.gpxApp.uploadedRoutes) {
             const uploadedRoute = window.gpxApp.uploadedRoutes.get(routeId);
-            if (uploadedRoute && uploadedRoute.showMarkers !== undefined) {
-                this.routes.get(routeId).showMarkers = uploadedRoute.showMarkers;
+            if (uploadedRoute) {
+                if (uploadedRoute.showStartMarker !== undefined) {
+                    this.routes.get(routeId).showStartMarker = uploadedRoute.showStartMarker;
+                }
+                if (uploadedRoute.showFinishMarker !== undefined) {
+                    this.routes.get(routeId).showFinishMarker = uploadedRoute.showFinishMarker;
+                }
             }
         }
 
@@ -186,7 +192,7 @@ class GPXMapManager {
         // Add markers if enabled for this specific route
         // Markers are added after routes so they appear on top
         const route = this.routes.get(routeId);
-        if (route && route.showMarkers) {
+        if (route && (route.showStartMarker || route.showFinishMarker)) {
             this.createMarkers(coordinates, routeId);
         }
 
@@ -229,11 +235,16 @@ class GPXMapManager {
                 finishMarkerColorInput.value = route.finishMarkerColor;
             }
             
-            // Sync showMarkers state from uploadedRoutes if available
+            // Sync marker states from uploadedRoutes if available
             if (window.gpxApp && window.gpxApp.uploadedRoutes) {
                 const uploadedRoute = window.gpxApp.uploadedRoutes.get(routeId);
-                if (uploadedRoute && uploadedRoute.showMarkers !== undefined) {
-                    route.showMarkers = uploadedRoute.showMarkers;
+                if (uploadedRoute) {
+                    if (uploadedRoute.showStartMarker !== undefined) {
+                        route.showStartMarker = uploadedRoute.showStartMarker;
+                    }
+                    if (uploadedRoute.showFinishMarker !== undefined) {
+                        route.showFinishMarker = uploadedRoute.showFinishMarker;
+                    }
                 }
             }
         }
@@ -308,9 +319,9 @@ class GPXMapManager {
             feature => feature.properties['route-id'] !== routeId
         );
         
-        // Add new markers for this route
-        this.markersSource.data.features.push(
-            {
+        // Add start marker if enabled
+        if (route.showStartMarker !== false) {
+            this.markersSource.data.features.push({
                 type: 'Feature',
                 properties: {
                     'marker-symbol': 'S',
@@ -321,8 +332,12 @@ class GPXMapManager {
                     type: 'Point',
                     coordinates: coordinates[0]
                 }
-            },
-            {
+            });
+        }
+        
+        // Add finish marker if enabled
+        if (route.showFinishMarker !== false) {
+            this.markersSource.data.features.push({
                 type: 'Feature',
                 properties: {
                     'marker-symbol': 'F',
@@ -333,8 +348,8 @@ class GPXMapManager {
                     type: 'Point',
                     coordinates: coordinates[coordinates.length - 1]
                 }
-            }
-        );
+            });
+        }
 
         this.addMarkersToMap();
     }
@@ -480,27 +495,20 @@ class GPXMapManager {
         this.setAndFixStyle(mapStyles[newStyle]);
     }
 
-    toggleRouteMarkers(routeId, show) {
+    toggleRouteMarker(routeId, markerType, show) {
         const route = this.routes.get(routeId);
         if (!route) return;
         
-        route.showMarkers = show;
-        
-        if (show) {
-            // Show markers for this specific route
-            this.createMarkers(route.coordinates, routeId);
-            this.ensureMarkersOnTop();
-        } else {
-            // Remove markers for this specific route
-            if (this.markersSource) {
-                // Remove markers for this route from the markers source
-                const features = this.markersSource.data.features.filter(
-                    feature => feature.properties['route-id'] !== routeId
-                );
-                this.markersSource.data.features = features;
-                this.map.getSource('markers').setData(this.markersSource.data);
-            }
+        // Update the appropriate marker flag
+        if (markerType === 'start') {
+            route.showStartMarker = show;
+        } else if (markerType === 'finish') {
+            route.showFinishMarker = show;
         }
+        
+        // Recreate markers for this route with the updated flags
+        this.createMarkers(route.coordinates, routeId);
+        this.ensureMarkersOnTop();
     }
 
     toggleMarkers(show) {
@@ -510,7 +518,7 @@ class GPXMapManager {
             // Show markers for all routes
             // Markers will be added after all routes, ensuring they appear on top
             this.routes.forEach((route, routeId) => {
-                if (route.showMarkers !== false) { // Only show if not explicitly disabled
+                if (route.showStartMarker || route.showFinishMarker) { // Show if at least one is enabled
                     this.createMarkers(route.coordinates, routeId);
                 }
             });

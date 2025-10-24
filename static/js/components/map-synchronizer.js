@@ -306,7 +306,10 @@ class MapSynchronizer {
                 console.log(`Route line width scaled from ${originalLayer.paint['line-width']} to ${scaledRouteLayer.paint['line-width']}`);
             }
             
-            if (routeData.showMarkers && routeData.markersSource && !exportMap.getSource('markers')) {
+            // Check if any markers should be shown (at least one marker enabled for any route)
+            const hasAnyMarkers = routeData.markersSource && routeData.markersSource.data.features.length > 0;
+            
+            if (hasAnyMarkers && !exportMap.getSource('markers')) {
                 exportMap.addSource('markers', routeData.markersSource);
                 
                 const scaledCircleRadius = 10 * scalingFactor;
@@ -341,11 +344,6 @@ class MapSynchronizer {
                 });
                 
                 console.log(`Marker styling scaled - Circle radius: ${scaledCircleRadius.toFixed(1)}, Text size: ${scaledTextSize.toFixed(1)}`);
-                
-                if (!routeData.showMarkers) {
-                    exportMap.setLayoutProperty('markers', 'visibility', 'none');
-                    exportMap.setLayoutProperty('marker-circles', 'visibility', 'none');
-                }
             }
             
             console.log('Route data synchronized successfully with scaled styling');

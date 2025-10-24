@@ -301,7 +301,8 @@ class GPXApp {
             filename: file.name,
             startMarkerColor: startMarkerColor,
             finishMarkerColor: finishMarkerColor,
-            showMarkers: true // Default to showing markers
+            showStartMarker: true, // Default to showing start marker
+            showFinishMarker: true // Default to showing finish marker
         });
 
         // Add the route to the map
@@ -330,7 +331,8 @@ class GPXApp {
     createRouteItem(routeId, route) {
         const routeItem = document.createElement('div');
         const isActive = routeId === this.mapManager.activeRouteId;
-        const showMarkers = route.showMarkers !== false; // Default to true if not set
+        const showStartMarker = route.showStartMarker !== false; // Default to true if not set
+        const showFinishMarker = route.showFinishMarker !== false; // Default to true if not set
         
         routeItem.className = `flex flex-col space-y-2 p-2 rounded-md border ${
             isActive 
@@ -363,16 +365,24 @@ class GPXApp {
                 </div>
             </div>
             <div class="flex items-center justify-between">
-                <label class="text-xs text-gray-700 dark:text-gray-300">Show markers:</label>
-                <button id="toggleMarkers_${routeId}" 
-                    class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${showMarkers ? 'bg-blue-600 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'}"
-                    onclick="gpxApp.toggleRouteMarkers('${routeId}')">
-                    <span class="pointer-events-none relative inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showMarkers ? 'translate-x-4' : 'translate-x-0'}">
-                        <span class="absolute inset-0 flex h-full w-full items-center justify-center transition-opacity" aria-hidden="true">
-                            <svg class="h-2 w-2 text-gray-400" fill="none" viewBox="0 0 8 8">
-                                <path d="M2 4l1-1m0 0l1-1M3 3L2 2m1 1l1 1" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
-                            </svg>
-                        </span>
+                <label class="text-xs text-gray-700 dark:text-gray-300 flex items-center space-x-1">
+                    <span>Show start (S):</span>
+                </label>
+                <button id="toggleStartMarker_${routeId}" 
+                    class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${showStartMarker ? 'bg-blue-600 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'}"
+                    onclick="gpxApp.toggleRouteStartMarker('${routeId}')">
+                    <span class="pointer-events-none relative inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showStartMarker ? 'translate-x-4' : 'translate-x-0'}">
+                    </span>
+                </button>
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-xs text-gray-700 dark:text-gray-300 flex items-center space-x-1">
+                    <span>Show finish (F):</span>
+                </label>
+                <button id="toggleFinishMarker_${routeId}" 
+                    class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${showFinishMarker ? 'bg-blue-600 dark:bg-blue-700' : 'bg-gray-200 dark:bg-gray-700'}"
+                    onclick="gpxApp.toggleRouteFinishMarker('${routeId}')">
+                    <span class="pointer-events-none relative inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${showFinishMarker ? 'translate-x-4' : 'translate-x-0'}">
                     </span>
                 </button>
             </div>
@@ -391,7 +401,8 @@ class GPXApp {
             if (mapRoute) {
                 mapRoute.startMarkerColor = uploadedRoute.startMarkerColor;
                 mapRoute.finishMarkerColor = uploadedRoute.finishMarkerColor;
-                mapRoute.showMarkers = uploadedRoute.showMarkers;
+                mapRoute.showStartMarker = uploadedRoute.showStartMarker;
+                mapRoute.showFinishMarker = uploadedRoute.showFinishMarker;
             }
         }
         
@@ -404,21 +415,41 @@ class GPXApp {
         this.updateRouteManagementUI();
     }
 
-    toggleRouteMarkers(routeId) {
+    toggleRouteStartMarker(routeId) {
         const route = this.uploadedRoutes.get(routeId);
         if (!route) return;
         
-        // Toggle the showMarkers state
-        route.showMarkers = !route.showMarkers;
+        // Toggle the showStartMarker state
+        route.showStartMarker = !route.showStartMarker;
         
         // Also update the map manager's route data
         const mapRoute = this.mapManager.routes.get(routeId);
         if (mapRoute) {
-            mapRoute.showMarkers = route.showMarkers;
+            mapRoute.showStartMarker = route.showStartMarker;
         }
         
         // Update the map manager
-        this.mapManager.toggleRouteMarkers(routeId, route.showMarkers);
+        this.mapManager.toggleRouteMarker(routeId, 'start', route.showStartMarker);
+        
+        // Update the UI
+        this.updateRouteManagementUI();
+    }
+
+    toggleRouteFinishMarker(routeId) {
+        const route = this.uploadedRoutes.get(routeId);
+        if (!route) return;
+        
+        // Toggle the showFinishMarker state
+        route.showFinishMarker = !route.showFinishMarker;
+        
+        // Also update the map manager's route data
+        const mapRoute = this.mapManager.routes.get(routeId);
+        if (mapRoute) {
+            mapRoute.showFinishMarker = route.showFinishMarker;
+        }
+        
+        // Update the map manager
+        this.mapManager.toggleRouteMarker(routeId, 'finish', route.showFinishMarker);
         
         // Update the UI
         this.updateRouteManagementUI();
