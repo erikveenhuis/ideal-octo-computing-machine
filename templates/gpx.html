@@ -8,7 +8,7 @@
 <link rel="dns-prefetch" href="https://api.mapbox.com">
 
 <!-- Mapbox CSS - Load early but don't block render -->
-<link href="https://api.mapbox.com/mapbox-gl-js/v3.16.0/mapbox-gl.css" rel="stylesheet" />
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.css" rel="stylesheet" />
 
 {% include 'components/gpx_styles.html' %}
 {% endblock %}
@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const loadExternalDeps = async () => {
         // Load Mapbox GL JS
         const mapboxScript = document.createElement('script');
-        mapboxScript.src = 'https://api.mapbox.com/mapbox-gl-js/v3.16.0/mapbox-gl.js';
+        mapboxScript.src = 'https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.js';
         
         // Load Pica.js for image processing
         const picaScript = document.createElement('script');
