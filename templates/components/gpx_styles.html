@@ -62,6 +62,20 @@
         display: none;
     }
 
+    /* Position Mapbox controls below the navigation bar */
+    .mapboxgl-ctrl-top-right {
+        position: fixed !important;
+        top: 6rem !important; /* Below the 4rem navigation bar */
+        right: 1rem !important;
+        z-index: 50 !important;
+    }
+
+    /* Ensure Mapbox controls stay above everything */
+    .mapboxgl-ctrl-group,
+    .mapboxgl-ctrl {
+        z-index: 50 !important;
+    }
+
     /* Clean up - no mobile support needed since we show message instead */
     @media print {
         .sidebar, .sidebar-content, .controls, .nav-links, #message, .mapboxgl-control-container {
@@ -80,12 +94,6 @@
             margin: 0 auto !important;
             page-break-after: avoid;
         }
-    }
-
-    /* Ensure Mapbox controls (navigation, etc.) stay above everything */
-    .mapboxgl-ctrl-group,
-    .mapboxgl-ctrl {
-        z-index: 30 !important;
     }
 
     /* Hide all Mapbox attribution elements completely */
