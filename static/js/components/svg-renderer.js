@@ -3,7 +3,7 @@
  * Handles creating SVG documents from organized features
  */
 class SVGRenderer {
-    static async createSVG(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map, visualBounds = null) {
+    static async createSVG(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map, visualBounds = null, overlayData = null) {
         // FIXED: Use actual canvas dimensions to maintain the same viewport as the map
         // This prevents the export from being zoomed in compared to the canvas
         const width = canvasWidth;
@@ -180,6 +180,20 @@ class SVGRenderer {
                     console.log(`⚠️ ${skippedCount} landuse features (including potential islands) were skipped - check styling`);
                 }
             }
+        }
+
+        // Add optional overlay layer after map features so it renders on top
+        if (overlayData && overlayData.innerContent) {
+            const viewBox = overlayData.viewBox || { minX: 0, minY: 0, width: width, height: height };
+            const scaleX = viewBox.width ? width / viewBox.width : 1;
+            const scaleY = viewBox.height ? height / viewBox.height : 1;
+            const translateX = -viewBox.minX * scaleX;
+            const translateY = -viewBox.minY * scaleY;
+
+            svgContent += `  <!-- OVERLAY LAYER -->\n`;
+            svgContent += `  <g class="overlay-layer" transform="translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})">\n`;
+            svgContent += overlayData.innerContent;
+            svgContent += `\n  </g>\n`;
         }
 
         svgContent += `</svg>`;

@@ -1413,6 +1413,12 @@ class SVGExporter {
             const backgroundColor = StyleAnalyzer.getBackgroundColor(map);
             console.log('✅ Got background color');
             
+            // Prepare optional overlay data for export (if selected)
+            let overlayExportData = null;
+            if (window.gpxApp && typeof window.gpxApp.getOverlayExportData === 'function') {
+                overlayExportData = await window.gpxApp.getOverlayExportData();
+            }
+
             // Create SVG document
             console.log('🔄 Creating SVG document...');
             const svgDocument = await SVGRenderer.createSVG(
@@ -1425,7 +1431,8 @@ class SVGExporter {
                 canvasHeight, 
                 backgroundColor, 
                 map,
-                usingVisualBounds ? boundsToUse : null
+                usingVisualBounds ? boundsToUse : null,
+                overlayExportData
             );
             console.log('✅ Created SVG document');
             

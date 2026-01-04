@@ -54,6 +54,58 @@
                 <option value="plexiglas_black">Plexiglas Black Style</option>
             </select>
         </div>
+        <div class="flex items-center justify-between">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Overlay:</label>
+            <select id="overlaySelect"
+                class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+                <option value="none" data-src="" selected>No overlay</option>
+                <option value="medal_default" data-src="{{ url_for('static', filename='Overlay, medaille rechts.svg') }}">Medal overlay</option>
+                <option value="medal_boxes" data-src="{{ url_for('static', filename='Overlay, medaille rechts, boxes.svg') }}">Medal overlay (boxes)</option>
+                <option value="medal_plain" data-src="{{ url_for('static', filename='Overlay, medaille rechts, plain.svg') }}">Medal overlay (plain)</option>
+            </select>
+        </div>
+        <div id="overlayTextFields" class="space-y-2 hidden">
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Title line 1:</label>
+                <input id="overlayTitle1" type="text" maxlength="40"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Title 1 size (px):</label>
+                <input id="overlayTitle1Size" type="number" min="8" max="200" step="1" value="46"
+                    class="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Title line 2:</label>
+                <input id="overlayTitle2" type="text" maxlength="40"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Title 2 size (px):</label>
+                <input id="overlayTitle2Size" type="number" min="8" max="200" step="1" value="20"
+                    class="w-24 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Date:</label>
+                <input id="overlayDate" type="text" maxlength="30"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Distance:</label>
+                <input id="overlayDistance" type="text" maxlength="20"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Time:</label>
+                <input id="overlayTime" type="text" maxlength="20"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+            <div class="flex items-center justify-between">
+                <label class="text-sm text-gray-700 dark:text-gray-300">Pace:</label>
+                <input id="overlayPace" type="text" maxlength="20"
+                    class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
+            </div>
+        </div>
     </div>
 
     <!-- Export settings section removed - anti-aliasing toggle was non-functional -->

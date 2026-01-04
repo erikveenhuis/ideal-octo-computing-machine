@@ -4,6 +4,54 @@ class GPXApp {
         this.csrfToken = csrfToken;
         this.exportManager = null; // Will be initialized when needed
         this.uploadedRoutes = new Map(); // Track uploaded routes with their colors
+        this.overlayOptions = {};
+        this.overlayCache = new Map();
+        this.selectedOverlayId = 'none';
+        this.overlayTextDefaults = {
+            medal_default: {
+                title1: 'UTRECHT',
+                title2: 'MARATHON',
+                title1Size: 46,
+                title2Size: 20,
+                date: '19 mei 2024',
+                distance: '42,2 km',
+                time: '4:39:18',
+                pace: '6:34'
+            },
+            medal_boxes: {
+                title1: 'UTRECHT',
+                title2: 'MARATHON',
+                title1Size: 46,
+                title2Size: 20,
+                date: '19 mei 2024',
+                distance: '42,2 km',
+                time: '4:39:18',
+                pace: '6:34'
+            },
+            medal_plain: {
+                title1: 'UTRECHT',
+                title2: 'MARATHON',
+                title1Size: 46,
+                title2Size: 20,
+                date: '19 mei 2024',
+                distance: '42,2 km',
+                time: '4:39:18',
+                pace: '6:34'
+            },
+            none: {
+                title1: '',
+                title2: '',
+                title1Size: 46,
+                title2Size: 20,
+                date: '',
+                distance: '',
+                time: '',
+                pace: ''
+            }
+        };
+        this.overlayTextState = {};
+        this.overlayTextValues = { ...this.overlayTextDefaults.medal_default };
+        this.currentOverlayExportData = null;
         
         this.init();
     }
@@ -20,6 +68,9 @@ class GPXApp {
         
         // Initialize toggle button states
         this.initializeToggleStates();
+
+        // Initialize overlay control
+        this.initializeOverlayControls();
     }
 
     initializeFormValidation() {
@@ -548,5 +599,296 @@ class GPXApp {
         }
         
         // Anti-aliasing toggle initialization removed - was non-functional for main map display
+    }
+
+    initializeOverlayControls() {
+        const overlaySelect = document.getElementById('overlaySelect');
+        const overlayContainer = document.getElementById('mapOverlayContainer');
+        const overlayImage = document.getElementById('mapOverlayImage');
+        const overlayTextFields = document.getElementById('overlayTextFields');
+        const overlayTitle1 = document.getElementById('overlayTitle1');
+        const overlayTitle2 = document.getElementById('overlayTitle2');
+        const overlayTitle1Size = document.getElementById('overlayTitle1Size');
+        const overlayTitle2Size = document.getElementById('overlayTitle2Size');
+        const overlayDistance = document.getElementById('overlayDistance');
+        const overlayTime = document.getElementById('overlayTime');
+        const overlayPace = document.getElementById('overlayPace');
+        const overlayDate = document.getElementById('overlayDate');
+
+        if (!overlaySelect || !overlayContainer || !overlayImage) {
+            return;
+        }
+
+        this.overlayTextInputs = {
+            title1: overlayTitle1,
+            title2: overlayTitle2,
+            title1Size: overlayTitle1Size,
+            title2Size: overlayTitle2Size,
+            distance: overlayDistance,
+            time: overlayTime,
+            pace: overlayPace,
+            date: overlayDate
+        };
+
+        // Build overlay options map from the select element
+        this.overlayOptions = Array.from(overlaySelect.options).reduce((acc, option) => {
+            acc[option.value] = {
+                id: option.value,
+                label: option.textContent,
+                src: option.dataset.src || ''
+            };
+            return acc;
+        }, {});
+
+        overlaySelect.addEventListener('change', (e) => {
+            this.setOverlay(e.target.value);
+        });
+
+        // Overlay text input listeners
+        Object.entries(this.overlayTextInputs).forEach(([key, input]) => {
+            if (input) {
+                input.addEventListener('input', (e) => {
+                    this.handleOverlayTextInput(key, e.target.value);
+                });
+            }
+        });
+
+        // Apply initial overlay selection
+        this.setOverlay(overlaySelect.value || 'none');
+        // Ensure text fields visibility reflects initial state
+        this.toggleOverlayTextFields(overlayTextFields, this.selectedOverlayId !== 'none');
+    }
+
+    setOverlay(overlayId) {
+        if (!this.overlayOptions[overlayId]) {
+            overlayId = 'none';
+        }
+
+        this.selectedOverlayId = overlayId;
+        this.ensureOverlayTextState(overlayId);
+        this.overlayTextValues = { ...this.overlayTextState[overlayId] };
+        this.updateOverlayTextInputs();
+
+        // Show/hide text fields
+        const overlayTextFields = document.getElementById('overlayTextFields');
+        this.toggleOverlayTextFields(overlayTextFields, overlayId !== 'none');
+
+        // Refresh the on-canvas overlay and cache the export data
+        this.refreshOverlayDisplayAndCache();
+    }
+
+    updateOverlayDisplay() {
+        this.refreshOverlayDisplayAndCache();
+    }
+
+    async preloadOverlayData(overlayId) {
+        const overlay = this.overlayOptions[overlayId];
+
+        if (!overlay || !overlay.src || overlayId === 'none') {
+            return null;
+        }
+
+        if (this.overlayCache.has(overlayId)) {
+            return this.overlayCache.get(overlayId);
+        }
+
+        try {
+            const response = await fetch(overlay.src);
+            if (!response.ok) {
+                throw new Error(`Failed to load overlay: ${response.statusText}`);
+            }
+
+            const svgText = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgText, 'image/svg+xml');
+            const svgEl = doc.documentElement;
+
+            const viewBox = this.parseViewBox(svgEl.getAttribute('viewBox'));
+            const innerContent = svgEl.innerHTML;
+
+            const overlayData = { viewBox, innerContent, rawSvg: svgText };
+            this.overlayCache.set(overlayId, overlayData);
+            return overlayData;
+        } catch (error) {
+            console.error('Error loading overlay SVG:', error);
+            return null;
+        }
+    }
+
+    async getOverlayExportData() {
+        return await this.refreshOverlayDisplayAndCache();
+    }
+
+    ensureOverlayTextState(overlayId) {
+        const defaults = this.overlayTextDefaults[overlayId] || this.overlayTextDefaults.none;
+        const existing = this.overlayTextState[overlayId];
+        this.overlayTextState[overlayId] = existing ? { ...defaults, ...existing } : { ...defaults };
+    }
+
+    updateOverlayTextInputs() {
+        if (!this.overlayTextInputs) return;
+        Object.entries(this.overlayTextInputs).forEach(([key, input]) => {
+            if (input) {
+                const value = this.overlayTextValues[key];
+                input.value = value !== undefined && value !== null ? value : '';
+            }
+        });
+    }
+
+    toggleOverlayTextFields(container, show) {
+        if (!container) return;
+        if (show) {
+            container.classList.remove('hidden');
+        } else {
+            container.classList.add('hidden');
+        }
+    }
+
+    handleOverlayTextInput(field, value) {
+        const normalizedValue = this.normalizeOverlayTextValue(field, value);
+        this.overlayTextValues[field] = normalizedValue;
+        this.overlayTextState[this.selectedOverlayId] = { ...this.overlayTextValues };
+        this.refreshOverlayDisplayAndCache();
+    }
+
+    parseViewBox(viewBoxAttr) {
+        if (!viewBoxAttr) return null;
+        const parts = viewBoxAttr.trim().split(/\s+/).map(parseFloat);
+        if (parts.length === 4 && parts.every(value => !Number.isNaN(value))) {
+            return {
+                minX: parts[0],
+                minY: parts[1],
+                width: parts[2],
+                height: parts[3]
+            };
+        }
+        return null;
+    }
+
+    getFontSize(value, fallback) {
+        const parsed = parseFloat(value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+        return fallback;
+    }
+
+    normalizeOverlayTextValue(field, value) {
+        if (field === 'title1Size' || field === 'title2Size') {
+            const parsed = parseFloat(value);
+            return Number.isFinite(parsed) ? parsed : '';
+        }
+        return value;
+    }
+
+    createTextElement(doc, x, y, lines, textAnchor = 'start') {
+        const ns = 'http://www.w3.org/2000/svg';
+        const textEl = doc.createElementNS(ns, 'text');
+        textEl.setAttribute('transform', `matrix(1 0 0 1 ${x} ${y})`);
+        textEl.setAttribute('text-anchor', textAnchor);
+
+        lines.forEach(line => {
+            const tspan = doc.createElementNS(ns, 'tspan');
+            tspan.setAttribute('x', '0');
+            tspan.setAttribute('y', line.y.toString());
+            tspan.setAttribute('style', line.style);
+            tspan.textContent = line.text || '';
+            textEl.appendChild(tspan);
+        });
+
+        return textEl;
+    }
+
+    async buildOverlayData(overlayId) {
+        const overlay = this.overlayOptions[overlayId];
+        if (!overlay || overlayId === 'none') {
+            this.currentOverlayExportData = null;
+            return null;
+        }
+
+        const base = await this.preloadOverlayData(overlayId);
+        if (!base || !base.rawSvg) {
+            this.currentOverlayExportData = null;
+            return null;
+        }
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(base.rawSvg, 'image/svg+xml');
+        const svgEl = doc.documentElement;
+
+        // Remove existing text nodes to replace with user content
+        svgEl.querySelectorAll('text').forEach(node => {
+            if (node.parentNode) {
+                node.parentNode.removeChild(node);
+            }
+        });
+
+        const values = this.overlayTextValues;
+        const defaults = this.overlayTextDefaults[overlayId] || this.overlayTextDefaults.none;
+        const title1Size = this.getFontSize(values.title1Size, defaults.title1Size);
+        const title2Size = this.getFontSize(values.title2Size, defaults.title2Size);
+        const title2Offset = Math.max(title1Size * 0.6, title2Size + 4);
+
+        // Center reference above date (based on date rect center ~ x=231.4)
+        const centerX = 231.4;
+
+        // Title block centered
+        svgEl.appendChild(this.createTextElement(doc, centerX, 120.7204, [
+            { text: values.title1 || '', y: 0, style: `font-family:'Arial Black';font-size:${title1Size}px;font-weight:bold;` },
+            { text: values.title2 || '', y: title2Offset, style: `font-family:'Arial Black';font-size:${title2Size}px;font-weight:bold;` }
+        ], 'middle'));
+
+        // Date block centered beneath titles
+        svgEl.appendChild(this.createTextElement(doc, centerX, 183.1047, [
+            { text: values.date || '', y: 0, style: "font-family:'Arial';font-size:20px;font-weight:normal;" }
+        ], 'middle'));
+
+        // Stats block (distance, time, pace)
+        svgEl.appendChild(this.createTextElement(doc, 227.8591, 707.8073, [
+            { text: values.distance || '', y: 0, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" },
+            { text: values.time || '', y: 30, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" },
+            { text: values.pace || '', y: 58.8, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" }
+        ]));
+
+        const serializer = new XMLSerializer();
+        const fullSVG = serializer.serializeToString(svgEl);
+        const overlayData = {
+            viewBox: this.parseViewBox(svgEl.getAttribute('viewBox')) || base.viewBox,
+            innerContent: svgEl.innerHTML,
+            fullSVG
+        };
+
+        this.currentOverlayExportData = overlayData;
+        return overlayData;
+    }
+
+    async refreshOverlayDisplayAndCache() {
+        const overlayContainer = document.getElementById('mapOverlayContainer');
+        const overlayImage = document.getElementById('mapOverlayImage');
+
+        if (!overlayContainer || !overlayImage) {
+            return null;
+        }
+
+        if (this.selectedOverlayId === 'none') {
+            overlayContainer.classList.add('hidden');
+            overlayImage.removeAttribute('src');
+            this.currentOverlayExportData = null;
+            return null;
+        }
+
+        const overlayData = await this.buildOverlayData(this.selectedOverlayId);
+        if (!overlayData || !overlayData.fullSVG) {
+            overlayContainer.classList.add('hidden');
+            overlayImage.removeAttribute('src');
+            return null;
+        }
+
+        const dataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(overlayData.fullSVG)}`;
+        overlayImage.src = dataUri;
+        overlayImage.alt = this.overlayOptions[this.selectedOverlayId]?.label || 'Overlay';
+        overlayContainer.classList.remove('hidden');
+
+        return overlayData;
     }
 } 
