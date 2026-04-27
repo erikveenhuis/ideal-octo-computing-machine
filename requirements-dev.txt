@@ -26,5 +26,5 @@ bandit>=1.9.2
 safety>=3.7.0
 
 # Development Tools
-pre-commit>=4.5.1
+pre-commit>=4.6.0
 pip-tools>=7.5.2 
