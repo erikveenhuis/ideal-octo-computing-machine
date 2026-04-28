@@ -14,30 +14,32 @@ class SVGRenderer {
         // Calculate projection from lat/lng to SVG coordinates
         // Pass visual bounds if available for more accurate projection
         const projection = MapProjection.create(bounds, center, width, height, bearing, visualBounds);
-        
-        // Generate font definitions for embedded fonts
-        console.log('🔤 Generating font definitions...');
-        const usedFonts = FeatureConverter.getUsedFonts();
-        let fontDefinitions = '';
-        
-        if (usedFonts.length > 0) {
-            const fontManager = FeatureConverter.initializeFontManager();
-            fontDefinitions = await fontManager.generateSVGFontDefinitions(usedFonts);
-            console.log(`✅ Generated font definitions for ${usedFonts.length} font variants`);
+
+        // Pre-load every text-font referenced by the visible labels into the
+        // document so canvas measureText returns accurate glyph widths during
+        // the feature-conversion pass below. Without this, wrapText falls back
+        // to a system font (typically Arial) which has different widths than
+        // DIN Pro and can flip wrap decisions.
+        const fontManager = FeatureConverter.initializeFontManager();
+        const labelLikeFeatures = [
+            ...(organizedFeatures.labels || []),
+            ...(organizedFeatures.roads || []),
+            ...(organizedFeatures.boundaries || []),
+            ...(organizedFeatures.water || [])
+        ];
+        const distinctFontSpecs = new Map();
+        for (const feature of labelLikeFeatures) {
+            const tf = feature.layer?.layout?.['text-font'];
+            if (Array.isArray(tf) && tf.length > 0) {
+                distinctFontSpecs.set(tf.join('|'), tf);
+            }
         }
-        
-        let svgContent = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" 
-     xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <title>GPX Route Export - ${new Date().toISOString().split('T')[0]}</title>
-  <desc>Vector export of map view centered at ${center.lat.toFixed(6)}, ${center.lng.toFixed(6)} (zoom ${zoom.toFixed(2)}, bearing ${bearing.toFixed(1)}°)</desc>
-  
-  ${fontDefinitions}
-  
-  <!-- Background -->
-  <rect width="100%" height="100%" fill="${backgroundColor}"/>
-  
-`;
+        if (distinctFontSpecs.size > 0) {
+            console.log(`🔤 Pre-loading ${distinctFontSpecs.size} text-font variant(s) for measurement`);
+            await fontManager.ensureAllFontsInDocument(
+                Array.from(distinctFontSpecs.values()).map(mapboxFontNames => ({ mapboxFontNames }))
+            );
+        }
 
         // FIXED: Use actual Mapbox style layer order instead of hardcoded order
         // This ensures proper rendering of islands above water features
@@ -109,6 +111,13 @@ class SVGRenderer {
             console.log(`  ${index}: ${item.type} (from ${item.sourceLayer}/${item.layerId}, style order ${item.styleOrder})`);
         });
 
+        // We render the feature body first so that FeatureConverter has had a
+        // chance to populate the usedFonts set; only then do we know which
+        // @font-face entries to embed. Previously fontDefinitions was built
+        // before the loop ran, so first-time exports shipped without the
+        // custom fonts at all.
+        let svgBody = `  <!-- Background -->\n  <rect width="100%" height="100%" fill="${backgroundColor}"/>\n\n`;
+
         // Render layers in the determined order
         for (const layerInfo of renderOrder) {
             const layerName = layerInfo.type;
@@ -116,8 +125,12 @@ class SVGRenderer {
             
             if (features && features.length > 0) {
                 console.log(`🎨 Rendering ${layerName} layer with ${features.length} features`);
-                svgContent += `  <!-- ${layerName.toUpperCase()} LAYER (from ${layerInfo.sourceLayer}) -->\n`;
-                svgContent += `  <g class="${layerName}-layer">\n`;
+                svgBody += `  <!-- ${layerName.toUpperCase()} LAYER (from ${layerInfo.sourceLayer}) -->\n`;
+                // Apply a small Gaussian blur to the roads group so SVG line
+                // edges match Mapbox's softer WebGL line rendering. See
+                // _buildHaloFilterDefs for filter rationale.
+                const groupFilterAttr = layerName === 'roads' ? ` filter="url(#line-soften)"` : '';
+                svgBody += `  <g class="${layerName}-layer"${groupFilterAttr}>\n`;
                 
                 let renderedCount = 0;
                 let skippedCount = 0;
@@ -131,11 +144,11 @@ class SVGRenderer {
                     console.log(`🛣️ RENDERING ROADS: ${caseFeatures.length} case + ${fillFeatures.length} fill`);
                     
                     // Render case features first (darker outlines)
-                    svgContent += `    <!-- Road Case Layers (outlines) -->\n`;
+                    svgBody += `    <!-- Road Case Layers (outlines) -->\n`;
                     for (const feature of caseFeatures) {
                         const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
                         if (svgElement) {
-                            svgContent += `    ${svgElement}\n`;
+                            svgBody += `    ${svgElement}\n`;
                             renderedCount++;
                         } else {
                             skippedCount++;
@@ -143,11 +156,11 @@ class SVGRenderer {
                     }
                     
                     // Render fill features on top (lighter centers)
-                    svgContent += `    <!-- Road Fill Layers (centers) -->\n`;
+                    svgBody += `    <!-- Road Fill Layers (centers) -->\n`;
                     for (const feature of fillFeatures) {
                         const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
                         if (svgElement) {
-                            svgContent += `    ${svgElement}\n`;
+                            svgBody += `    ${svgElement}\n`;
                             renderedCount++;
                         } else {
                             skippedCount++;
@@ -158,7 +171,7 @@ class SVGRenderer {
                     for (const feature of features) {
                         const svgElement = FeatureConverter.featureToSVG(feature, projection, map);
                         if (svgElement) {
-                            svgContent += `    ${svgElement}\n`;
+                            svgBody += `    ${svgElement}\n`;
                             renderedCount++;
                         } else {
                             skippedCount++;
@@ -172,7 +185,7 @@ class SVGRenderer {
                     }
                 }
                 
-                svgContent += `  </g>\n`;
+                svgBody += `  </g>\n`;
                 
                 // Summary logging for all layers
                 console.log(`🎨 ${layerName.toUpperCase()} SUMMARY: ${renderedCount} rendered, ${skippedCount} skipped`);
@@ -190,14 +203,65 @@ class SVGRenderer {
             const translateX = -viewBox.minX * scaleX;
             const translateY = -viewBox.minY * scaleY;
 
-            svgContent += `  <!-- OVERLAY LAYER -->\n`;
-            svgContent += `  <g class="overlay-layer" transform="translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})">\n`;
-            svgContent += overlayData.innerContent;
-            svgContent += `\n  </g>\n`;
+            svgBody += `  <!-- OVERLAY LAYER -->\n`;
+            svgBody += `  <g class="overlay-layer" transform="translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})">\n`;
+            svgBody += overlayData.innerContent;
+            svgBody += `\n  </g>\n`;
         }
 
-        svgContent += `</svg>`;
+        // Now that featureToSVG has populated usedFonts and any halo-blur
+        // filter has been recorded, generate the <defs> block (font @font-face
+        // CSS plus shared SVG filters) and assemble the final document.
+        console.log('🔤 Generating font definitions...');
+        const usedFonts = FeatureConverter.getUsedFonts();
+        let fontDefinitions = '';
+        if (usedFonts.length > 0) {
+            fontDefinitions = await fontManager.generateSVGFontDefinitions(usedFonts);
+            console.log(`✅ Generated font definitions for ${usedFonts.length} font variants`);
+        }
+
+        const filterDefs = SVGRenderer._buildHaloFilterDefs();
+
+        const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"
+     xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <title>GPX Route Export - ${new Date().toISOString().split('T')[0]}</title>
+  <desc>Vector export of map view centered at ${center.lat.toFixed(6)}, ${center.lng.toFixed(6)} (zoom ${zoom.toFixed(2)}, bearing ${bearing.toFixed(1)}°)</desc>
+${fontDefinitions}${filterDefs}
+
+${svgBody}</svg>`;
         return svgContent;
+    }
+
+    /**
+     * Generate <defs> entries for the SVG filters we use:
+     *
+     * - halo-blur-* : applied to text halos in two-pass rendering. Mapbox
+     *   SDF text rendering produces a soft halo edge; without these the SVG
+     *   stroke is razor-sharp and makes labels look harsher.
+     *
+     * - line-soften : a very small Gaussian blur applied to the roads layer
+     *   group. Mapbox's WebGL line rendering has sub-pixel anti-aliasing
+     *   that produces a slightly soft line edge; SVG strokes (even with
+     *   shape-rendering="optimizeQuality") are pixel-crisp, which makes the
+     *   roads look harder/sharper than the canvas. A 0.4px blur is below
+     *   the threshold of "visibly blurry" but smooths the edge to match.
+     */
+    static _buildHaloFilterDefs() {
+        const blurValues = [0.3, 0.6, 1.0, 1.5, 2.0];
+        const haloFilters = blurValues.map(v => `    <filter id="halo-blur-${v.toString().replace('.', '_')}" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="${v}"/>
+    </filter>`).join('\n');
+
+        const lineSoften = `    <filter id="line-soften" x="-2%" y="-2%" width="104%" height="104%">
+      <feGaussianBlur stdDeviation="0.25"/>
+    </filter>`;
+
+        return `
+  <defs>
+${haloFilters}
+${lineSoften}
+  </defs>`;
     }
 }
 

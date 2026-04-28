@@ -33,18 +33,37 @@ class MapProjection {
         console.log(`Center vs Bounds center difference: lng=${(centerDiff.lng * 111000).toFixed(1)}m, lat=${(centerDiff.lat * 111000).toFixed(1)}m`);
         
         // Use the actual bounds directly from the map - this should match the screen exactly
-        const lngSpan = ne.lng() - sw.lng();
-        const latSpan = ne.lat() - sw.lat();
-        
+        const swLng = sw.lng();
+        const swLat = sw.lat();
+        const neLng = ne.lng();
+        const neLat = ne.lat();
+        const lngSpan = neLng - swLng;
+        const latSpan = neLat - swLat;
+
         console.log(`Span: lng=${lngSpan.toFixed(6)}, lat=${latSpan.toFixed(6)}`);
-        
+
+        // Use Web Mercator for the y axis to match Mapbox's canvas projection.
+        // A linear lat→y interpolation drifts symmetrically away from the canvas
+        // toward the top and bottom edges of a tall viewport (the export is
+        // 850x1100), making features near the top/bottom of the SVG appear
+        // shifted relative to what the user sees on the canvas. Mercator y is
+        // y(φ) = ln(tan(π/4 + φ/2)); since the canvas already projects with
+        // this formula we match it here.
+        const toMercY = (lat) => {
+            const clamped = Math.max(Math.min(lat, 85.05112878), -85.05112878);
+            return Math.log(Math.tan(Math.PI / 4 + (clamped * Math.PI) / 360));
+        };
+        const mercNorth = toMercY(neLat);
+        const mercSouth = toMercY(swLat);
+        const mercSpan = mercNorth - mercSouth;
+
         return {
-            lngToX: (lng) => ((lng - sw.lng()) / lngSpan) * width,
-            latToY: (lat) => ((ne.lat() - lat) / latSpan) * height,
+            lngToX: (lng) => ((lng - swLng) / lngSpan) * width,
+            latToY: (lat) => ((mercNorth - toMercY(lat)) / mercSpan) * height,
             bounds: bounds,
             bearing: bearing,
             centerDiff: centerDiff,
-            actualBounds: { sw: { lng: sw.lng(), lat: sw.lat() }, ne: { lng: ne.lng(), lat: ne.lat() } }
+            actualBounds: { sw: { lng: swLng, lat: swLat }, ne: { lng: neLng, lat: neLat } }
         };
     }
 }

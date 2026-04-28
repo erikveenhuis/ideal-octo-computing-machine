@@ -1,11 +1,15 @@
 /**
  * Font Manager
- * Handles embedding .otf fonts into SVG exports
+ * Handles embedding .otf fonts into SVG exports and provides accurate text
+ * measurement via the browser's Canvas 2D API once the fonts are loaded.
  */
 class FontManager {
     constructor() {
         this.fontCache = new Map();
         this.fontMappings = new Map();
+        this._loadedDocumentFonts = new Set(); // family|weight|style keys
+        this._measureCanvas = null;
+        this._measureCtx = null;
         this.setupDefaultMappings();
     }
 
@@ -81,48 +85,77 @@ class FontManager {
     }
 
     /**
-     * Get font family name from Mapbox font names
+     * Get font family name from Mapbox font names.
+     *
+     * Strips trailing weight/style tokens iteratively so multi-token suffixes
+     * like "Bold Italic" or "Medium Italic" are removed without dropping
+     * meaningful family modifiers like "Condensed".
+     *   "DIN Pro Bold"            -> "DIN Pro"
+     *   "DIN Pro Bold Italic"     -> "DIN Pro"
+     *   "DIN Pro Condensed Bold"  -> "DIN Pro Condensed"
      */
     extractFontFamily(mapboxFontNames) {
         if (!Array.isArray(mapboxFontNames) || mapboxFontNames.length === 0) {
             return null;
         }
 
-        // Take the first font name and extract the family name
-        const firstName = mapboxFontNames[0];
-        
-        // Remove weight indicators to get base family name
-        return firstName
-            .replace(/\s+(Regular|Bold|Light|Medium|Italic|Black|Thin|ExtraLight|SemiBold|ExtraBold)$/i, '')
-            .trim();
+        let name = mapboxFontNames[0];
+        const trailingToken = /\s+(Italic|Oblique|Regular|Light|Medium|Bold|Black|Thin|Heavy|Hairline|SemiBold|ExtraBold|UltraBold|ExtraLight|UltraLight|DemiBold|Demi)$/i;
+
+        let previous;
+        do {
+            previous = name;
+            name = name.replace(trailingToken, '');
+        } while (name !== previous);
+
+        return name.trim();
     }
 
     /**
-     * Get font weight from Mapbox font names
+     * Get font weight from a Mapbox text-font entry.
+     *
+     * Mapbox font arrays are [primary, ...fallbacks]; the primary name is the
+     * authoritative one. Fallbacks like "Arial Unicode MS Bold" frequently end
+     * in "Bold" regardless of the primary's actual weight, so scanning the
+     * joined string yields false positives (e.g. a "DIN Pro Medium" label
+     * being reported as bold). Match only against the primary name and check
+     * the more specific tokens before generic ones (extrabold/semibold before
+     * bold, extralight before light) so all weights resolve correctly.
      */
     extractFontWeight(mapboxFontNames) {
         if (!Array.isArray(mapboxFontNames) || mapboxFontNames.length === 0) {
-            return 'normal';
+            return '400';
         }
 
-        const fontString = mapboxFontNames.join(' ').toLowerCase();
-        
-        if (fontString.includes('bold')) return 'bold';
-        if (fontString.includes('light')) return '300';
-        if (fontString.includes('medium')) return '500';
-        if (fontString.includes('semibold')) return '600';
-        if (fontString.includes('extrabold')) return '800';
-        if (fontString.includes('black')) return '900';
-        if (fontString.includes('thin')) return '100';
-        if (fontString.includes('extralight')) return '200';
-        
-        return 'normal';
+        const primary = (mapboxFontNames[0] || '').toLowerCase();
+
+        if (/extra\s*bold|ultra\s*bold/.test(primary)) return '800';
+        if (/semi\s*bold|demi\s*bold/.test(primary)) return '600';
+        if (/extra\s*light|ultra\s*light/.test(primary)) return '200';
+        if (primary.includes('black') || primary.includes('heavy')) return '900';
+        if (primary.includes('bold')) return '700';
+        if (primary.includes('medium')) return '500';
+        if (primary.includes('light')) return '300';
+        if (primary.includes('thin') || primary.includes('hairline')) return '100';
+
+        return '400';
+    }
+
+    /**
+     * Get font style (italic vs normal) from a Mapbox text-font entry.
+     */
+    extractFontStyle(mapboxFontNames) {
+        if (!Array.isArray(mapboxFontNames) || mapboxFontNames.length === 0) {
+            return 'normal';
+        }
+        const primary = (mapboxFontNames[0] || '').toLowerCase();
+        return /italic|oblique/.test(primary) ? 'italic' : 'normal';
     }
 
     /**
      * Generate CSS font-face definitions for SVG
      */
-    async generateFontFaceCSS(fontFamilyName, fontWeight, mapboxFontNames) {
+    async generateFontFaceCSS(fontFamilyName, fontWeight, fontStyle, mapboxFontNames) {
         // Find the appropriate font file for this family and weight
         let fontFilename = null;
         
@@ -150,38 +183,49 @@ class FontManager {
         @font-face {
             font-family: '${fontFamilyName}';
             font-weight: ${fontWeight};
-            font-style: normal;
+            font-style: ${fontStyle};
             src: url(data:font/otf;base64,${base64Font}) format('opentype');
         }`;
     }
 
     /**
-     * Generate all necessary font definitions for an SVG
+     * Generate all necessary font definitions for an SVG.
+     *
+     * Deduplicates by the (family, weight, style) tuple so that, for example,
+     * "DIN Pro Bold" and "DIN Pro Black" don't both end up declared as
+     * font-weight: bold (the previous behaviour caused a CSS-spec last-wins
+     * collision where heavier glyphs were silently replaced by lighter ones).
      */
     async generateSVGFontDefinitions(usedFonts) {
-        const fontDefinitions = new Set();
-        
+        const seen = new Set();
+        const fontDefinitions = [];
+
         for (const fontInfo of usedFonts) {
             const { mapboxFontNames } = fontInfo;
             const fontFamily = this.extractFontFamily(mapboxFontNames);
             const fontWeight = this.extractFontWeight(mapboxFontNames);
-            
-            if (fontFamily) {
-                const fontFaceCSS = await this.generateFontFaceCSS(fontFamily, fontWeight, mapboxFontNames);
-                if (fontFaceCSS) {
-                    fontDefinitions.add(fontFaceCSS);
-                }
+            const fontStyle = this.extractFontStyle(mapboxFontNames);
+
+            if (!fontFamily) continue;
+
+            const key = `${fontFamily}|${fontWeight}|${fontStyle}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const fontFaceCSS = await this.generateFontFaceCSS(fontFamily, fontWeight, fontStyle, mapboxFontNames);
+            if (fontFaceCSS) {
+                fontDefinitions.push(fontFaceCSS);
             }
         }
 
-        if (fontDefinitions.size === 0) {
+        if (fontDefinitions.length === 0) {
             return '';
         }
 
         return `
   <defs>
     <style type="text/css"><![CDATA[
-      ${Array.from(fontDefinitions).join('\n')}
+      ${fontDefinitions.join('\n')}
     ]]></style>
   </defs>`;
     }
@@ -193,20 +237,122 @@ class FontManager {
         if (!Array.isArray(mapboxFontNames) || mapboxFontNames.length === 0) {
             return {
                 fontFamily: 'Arial, sans-serif',
-                fontWeight: 'normal'
+                fontWeight: '400',
+                fontStyle: 'normal'
             };
         }
 
         const fontFamily = this.extractFontFamily(mapboxFontNames);
         const fontWeight = this.extractFontWeight(mapboxFontNames);
-        
+        const fontStyle = this.extractFontStyle(mapboxFontNames);
+
         // If we have a custom font family, use it; otherwise fall back to web-safe fonts
         const finalFontFamily = fontFamily ? `'${fontFamily}', Arial, sans-serif` : 'Arial, sans-serif';
-        
+
         return {
             fontFamily: finalFontFamily,
-            fontWeight: fontWeight
+            fontWeight: fontWeight,
+            fontStyle: fontStyle,
+            // Pure family name without quotes/fallbacks for canvas measureText
+            measureFontFamily: fontFamily ? `'${fontFamily}'` : 'Arial, sans-serif'
         };
+    }
+
+    /**
+     * Load a font into the document so canvas 2D measureText can measure
+     * glyph widths accurately. Idempotent per (family,weight,style) key.
+     */
+    async ensureFontInDocument(mapboxFontNames) {
+        if (!Array.isArray(mapboxFontNames) || mapboxFontNames.length === 0) {
+            return false;
+        }
+        const family = this.extractFontFamily(mapboxFontNames);
+        const weight = this.extractFontWeight(mapboxFontNames);
+        const style = this.extractFontStyle(mapboxFontNames);
+        if (!family) return false;
+
+        const key = `${family}|${weight}|${style}`;
+        if (this._loadedDocumentFonts.has(key)) return true;
+
+        let filename = null;
+        for (const name of mapboxFontNames) {
+            if (this.fontMappings.has(name)) {
+                filename = this.fontMappings.get(name);
+                break;
+            }
+        }
+        if (!filename) return false;
+
+        const fontPath = `/static/fonts/${filename}`;
+        const base64 = await this.loadFontAsBase64(fontPath);
+        if (!base64) return false;
+
+        if (!('FontFace' in window) || !document.fonts || !document.fonts.add) {
+            // Browser without FontFace API support; mark as "tried" to avoid retrying.
+            this._loadedDocumentFonts.add(key);
+            return false;
+        }
+
+        try {
+            const fontFace = new FontFace(family, `url(data:font/otf;base64,${base64}) format('opentype')`, {
+                weight: String(weight),
+                style: style
+            });
+            await fontFace.load();
+            document.fonts.add(fontFace);
+            this._loadedDocumentFonts.add(key);
+            return true;
+        } catch (err) {
+            console.warn(`Could not register font ${family} ${weight} ${style}:`, err);
+            this._loadedDocumentFonts.add(key);
+            return false;
+        }
+    }
+
+    /**
+     * Load every font we'll need for the export so subsequent measureText calls
+     * are accurate. Accepts the same objects we pushed into FeatureConverter.usedFonts.
+     */
+    async ensureAllFontsInDocument(usedFonts) {
+        if (!usedFonts || usedFonts.length === 0) return;
+        const tasks = [];
+        for (const fontInfo of usedFonts) {
+            if (fontInfo && fontInfo.mapboxFontNames) {
+                tasks.push(this.ensureFontInDocument(fontInfo.mapboxFontNames));
+            }
+        }
+        await Promise.all(tasks);
+        if (document.fonts && typeof document.fonts.ready?.then === 'function') {
+            await document.fonts.ready;
+        }
+    }
+
+    /**
+     * Measure the rendered pixel width of `text` for a given font specification.
+     *
+     * letterSpacingEm is Mapbox's text-letter-spacing in em units (default 0).
+     * It's added to the measured width as (chars - 1) * letterSpacingEm *
+     * fontSize, which matches how Mapbox lays out characters with extra
+     * tracking. This is the primary reason "ROTTERDAM-NOORD" / "OUDE WESTEN"
+     * style neighbourhood labels were not wrapping in the export: Mapbox
+     * commonly applies ~0.1 em letter spacing to those layers, and without
+     * accounting for it, our measured width is far too narrow.
+     */
+    measureTextWidth(text, fontFamily, fontSize, fontWeight = '400', fontStyle = 'normal', letterSpacingEm = 0) {
+        if (!text) return 0;
+        if (!this._measureCanvas) {
+            this._measureCanvas = document.createElement('canvas');
+            this._measureCtx = this._measureCanvas.getContext('2d');
+        }
+        const ctx = this._measureCtx;
+        const fontSpec = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        if (ctx.font !== fontSpec) {
+            ctx.font = fontSpec;
+        }
+        const baseWidth = ctx.measureText(text).width;
+        const trackingChars = Math.max(0, text.length - 1);
+        const tracking = trackingChars * (letterSpacingEm || 0) * fontSize;
+        return baseWidth + tracking;
     }
 }
 

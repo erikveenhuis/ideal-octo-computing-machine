@@ -108,10 +108,12 @@ class FeatureConverter {
             }
         }
         
-        // Apply same opacity override as canvas for route lines
-        if (layerId === 'route') {
-            opacity = 0.7; // Match canvas route opacity
-        }
+        // No opacity override here - the route layer's actual paint sets
+        // line-opacity to 1.0 (see gpx-map-manager.js addRoute), so we
+        // honor whatever paint['line-opacity'] resolved to above. The
+        // previous hardcoded 0.7 blended the route with the map background
+        // and showed up as a darker / more washed-out color depending on
+        // the active map style.
         
         // Handle RGBA color objects if needed
         if (color && typeof color === 'object' && color !== null && 'r' in color) {
@@ -531,19 +533,31 @@ class FeatureConverter {
                 mapboxFontNames: ['DIN Pro Bold', 'Arial Unicode MS Bold']
             });
             
-            // Create combined circle+text marker with soft appearance and proper font
+            // Create combined circle+text marker. Match the canvas paint
+            // exactly: circle-opacity 1.0, text-opacity 1.0, font weight
+            // matching the marker label layer (Open Sans Bold = 700).
+            //
+            // Vertical centering: dominant-baseline="central" alone is
+            // unreliable across SVG renderers (some align to font central
+            // metric, others to alphabetic baseline). For uppercase glyphs
+            // (S, F) the visually balanced position is ~0.35 em below the
+            // y coordinate when the baseline sits at y, so we set y to
+            // the circle center and add dy="0.35em" to push the baseline
+            // down. Combined with text-anchor="middle" this centers the
+            // glyph in the circle the same way Mapbox's text-anchor:'center'
+            // does on canvas. Previously a hardcoded "y + 0.5" offset
+            // pushed the text below center.
             return `<g class="marker">
     <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${radius}" fill="${circleColor}" fill-opacity="${circleOpacity}"/>
-    <text x="${x.toFixed(2)}" y="${(y + 0.5).toFixed(2)}" 
-          text-anchor="middle" 
-          dominant-baseline="central"
+    <text x="${x.toFixed(2)}" y="${y.toFixed(2)}" dy="0.35em"
+          text-anchor="middle"
           text-rendering="optimizeLegibility"
           style="font-smooth: always; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;"
           font-family="${processedFont.fontFamily}"
           font-size="${fontSize}"
-          font-weight="600"
+          font-weight="${processedFont.fontWeight || '700'}"
           fill="${textColor}"
-          fill-opacity="0.95">${text}</text>
+          fill-opacity="${textOpacity}">${text}</text>
 </g>`;
         }
         
@@ -579,6 +593,7 @@ class FeatureConverter {
             const textOpacity = paint['text-opacity'];
             const textHaloColor = paint['text-halo-color'];
             const textHaloWidth = paint['text-halo-width'];
+            const textHaloBlur = paint['text-halo-blur'];
             
             // Don't render if text color is not defined (might be intentionally hidden)
             if (!textColor && !textHaloColor) {
@@ -588,7 +603,9 @@ class FeatureConverter {
             // Initialize font manager and process fonts
             const fontManager = this.initializeFontManager();
             let fontFamily = 'Arial, sans-serif';
-            let fontWeight = 'normal';
+            let fontWeight = '400';
+            let fontStyle = 'normal';
+            let measureFontFamily = 'Arial, sans-serif';
             
             if (layout['text-font'] && Array.isArray(layout['text-font'])) {
                 // Log detected font for user reference
@@ -608,70 +625,114 @@ class FeatureConverter {
                 const processedFont = fontManager.processMapboxFonts(layout['text-font']);
                 fontFamily = processedFont.fontFamily;
                 fontWeight = processedFont.fontWeight;
+                fontStyle = processedFont.fontStyle;
+                measureFontFamily = processedFont.measureFontFamily;
             }
             
             
             
-            // Check for text wrapping based on text-max-width
+            // Check for text wrapping based on text-max-width.
+            // Wrap decisions are driven by the actual rendered text width,
+            // measured with the same font family/weight/style + letter
+            // spacing that will end up in the SVG so the export matches
+            // what Mapbox lays out.
             const textMaxWidth = layout['text-max-width'];
-            const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId);
+            const textLetterSpacing = typeof layout['text-letter-spacing'] === 'number' ? layout['text-letter-spacing'] : 0;
+            const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
+                measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
+            });
             
 
             
-            let textElement = `<text x="${x.toFixed(2)}" y="${(y + 0.5).toFixed(2)}" 
-                text-anchor="middle" 
-                dominant-baseline="central"
-                text-rendering="optimizeLegibility"
-                style="font-smooth: always; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;"`;
-            
-            // Only add attributes that are defined in the style
-            if (fontFamily) textElement += ` font-family="${fontFamily}"`;
-            if (fontSize) textElement += ` font-size="${fontSize}"`;
-            if (fontWeight) {
-                // Use softer font weight for marker text
-                const markerFontWeight = isMarkerFeature ? '600' : fontWeight;
-                textElement += ` font-weight="${markerFontWeight}"`;
-            }
-            if (textColor) textElement += ` fill="${textColor}"`;
-            if (textOpacity !== undefined) {
-                // Use fully opaque text for marker text
-                const markerOpacity = isMarkerFeature ? '1.0' : textOpacity;
-                textElement += ` fill-opacity="${markerOpacity}"`;
-            }
-            
-            // Add text halo/stroke only if specified in the original style
-            if (textHaloWidth && textHaloWidth > 0 && textHaloColor) {
-                textElement += ` stroke="${textHaloColor}" 
-                stroke-width="${textHaloWidth * 2}" 
-                stroke-opacity="0.8"
-                paint-order="stroke fill"`;
-            }
-            
-            textElement += `>`;
-            
-            // Handle wrapped text with tspan elements
+            // Build the inner content (raw text or tspans) once so we can reuse
+            // it across the halo and fill text elements.
+            let innerContent;
             if (wrappedText.length > 1) {
-                const lineHeight = fontSize * 1.2; // Standard line height
-                const startY = y - ((wrappedText.length - 1) * lineHeight / 2);
-                
-                wrappedText.forEach((line, index) => {
-                    const yPos = startY + (index * lineHeight);
-                    textElement += `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`;
-                });
+                const lineHeight = fontSize * 1.2;
+                innerContent = wrappedText.map((line, index) =>
+                    `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`
+                ).join('');
             } else {
-                textElement += text;
+                innerContent = wrappedText[0] !== undefined ? wrappedText[0] : text;
             }
-            
-            textElement += `</text>`;
+
+            // Common positioning + font attributes shared by halo and fill passes
+            const markerFontWeight = isMarkerFeature ? '600' : fontWeight;
+            const finalFillOpacity = isMarkerFeature ? '1.0' : textOpacity;
+            const letterSpacingPx = textLetterSpacing && fontSize ? (textLetterSpacing * fontSize) : 0;
+            const baseAttrs = [
+                `x="${x.toFixed(2)}"`,
+                `y="${(y + 0.5).toFixed(2)}"`,
+                `text-anchor="middle"`,
+                `dominant-baseline="central"`,
+                `text-rendering="optimizeLegibility"`,
+                `style="font-smooth: always; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;"`,
+                fontFamily ? `font-family="${fontFamily}"` : '',
+                fontSize ? `font-size="${fontSize}"` : '',
+                markerFontWeight ? `font-weight="${markerFontWeight}"` : '',
+                fontStyle && fontStyle !== 'normal' ? `font-style="${fontStyle}"` : '',
+                letterSpacingPx ? `letter-spacing="${letterSpacingPx.toFixed(2)}"` : ''
+            ].filter(Boolean).join(' ');
+
+            const fillAttrs = [
+                textColor ? `fill="${textColor}"` : '',
+                finalFillOpacity !== undefined ? `fill-opacity="${finalFillOpacity}"` : ''
+            ].filter(Boolean).join(' ');
+
+            const hasHalo = textHaloWidth && textHaloWidth > 0 && textHaloColor;
+            const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
+
+            let textElement;
+            if (hasHalo) {
+                const halo = this.resolveHaloPaint(textHaloColor);
+                const haloAttrs = `stroke="${halo.color}" stroke-width="${textHaloWidth * 2}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
+
+                if (haloBlurFilter) {
+                    // Two-pass: blurred halo behind, sharp fill on top. This
+                    // is what Mapbox's SDF renderer effectively produces and
+                    // why the canvas halo looks soft. Without the blur our
+                    // halo was a hard outline, making bold labels (Rotterdam)
+                    // look less weighty and lighter labels look harsher.
+                    textElement = `<g class="label">`
+                        + `<text ${baseAttrs} fill="none" ${haloAttrs} filter="url(#${haloBlurFilter})">${innerContent}</text>`
+                        + `<text ${baseAttrs} ${fillAttrs}>${innerContent}</text>`
+                        + `</g>`;
+                } else {
+                    // Single element with paint-order="stroke fill" - same
+                    // glyphs render the halo and the fill so they stay aligned.
+                    textElement = `<text ${baseAttrs} ${fillAttrs} ${haloAttrs} paint-order="stroke fill">${innerContent}</text>`;
+                }
+            } else {
+                textElement = `<text ${baseAttrs} ${fillAttrs}>${innerContent}</text>`;
+            }
             
             // ENHANCED: For text-only marker features, add a circle background
+            // and rebuild the text with marker-appropriate centering. The
+            // baseAttrs above use y+0.5 plus dominant-baseline=central, which
+            // is fine for free-floating place labels but leaves the symbol
+            // visibly low inside a marker circle.
             if (isMarkerFeature && properties['marker-symbol'] && properties['marker-color']) {
                 const markerColor = properties['marker-color'];
                 const markerRadius = 10;
-                
+
+                const markerTextAttrs = [
+                    `x="${x.toFixed(2)}"`,
+                    `y="${y.toFixed(2)}"`,
+                    `dy="0.35em"`,
+                    `text-anchor="middle"`,
+                    `text-rendering="optimizeLegibility"`,
+                    `style="font-smooth: always; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;"`,
+                    fontFamily ? `font-family="${fontFamily}"` : '',
+                    fontSize ? `font-size="${fontSize}"` : '',
+                    `font-weight="${fontWeight || '700'}"`,
+                    fontStyle && fontStyle !== 'normal' ? `font-style="${fontStyle}"` : '',
+                    textColor ? `fill="${textColor}"` : 'fill="#ffffff"',
+                    `fill-opacity="${textOpacity !== undefined ? textOpacity : 1}"`
+                ].filter(Boolean).join(' ');
+
                 return `<g class="marker">
     <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${markerRadius}" fill="${markerColor}" fill-opacity="1.0"/>
-    ${textElement}
+    <text ${markerTextAttrs}>${innerContent}</text>
 </g>`;
             }
             
@@ -704,16 +765,20 @@ class FeatureConverter {
                     mapboxFontNames: ['DIN Pro Bold', 'Arial Unicode MS Bold']
                 });
                 
+                // Center uppercase glyph in the circle: y at circle center,
+                // dy=0.35em pushes the alphabetic baseline down so the cap
+                // height straddles the center. Replaces the previous
+                // "y + 0.5 + dominant-baseline=central" combo that left
+                // the text slightly below center.
                 return `<g class="marker">
     <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${radius}" fill="${color}" fill-opacity="${opacity}"/>
-    <text x="${x.toFixed(2)}" y="${(y + 0.5).toFixed(2)}" 
-          text-anchor="middle" 
-          dominant-baseline="central"
+    <text x="${x.toFixed(2)}" y="${y.toFixed(2)}" dy="0.35em"
+          text-anchor="middle"
           text-rendering="optimizeLegibility"
           style="font-smooth: always; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;"
           font-family="${processedFont.fontFamily}"
           font-size="${fontSize}"
-          font-weight="600"
+          font-weight="${processedFont.fontWeight || '700'}"
           fill="${textColor}"
           fill-opacity="1.0">${text}</text>
 </g>`;
@@ -724,6 +789,65 @@ class FeatureConverter {
         
         // Don't render default points for place labels - they should only be text
         return null;
+    }
+
+    /**
+     * Return a halo color/opacity pair suitable for SVG stroke + stroke-opacity
+     * without double-applying alpha. Mapbox's text-halo-color may arrive as an
+     * RGBA object {r,g,b,a} or a CSS string ("white", "#fff", "rgba(...)"),
+     * each with its own alpha channel. SVG composites stroke-color alpha and
+     * stroke-opacity multiplicatively, so we strip alpha out of the color and
+     * surface it via stroke-opacity to match canvas behaviour exactly.
+     */
+    static resolveHaloPaint(haloColor) {
+        if (haloColor && typeof haloColor === 'object' && 'r' in haloColor) {
+            const r = Math.round((haloColor.r ?? 0) * 255);
+            const g = Math.round((haloColor.g ?? 0) * 255);
+            const b = Math.round((haloColor.b ?? 0) * 255);
+            const a = haloColor.a !== undefined ? haloColor.a : 1;
+            return { color: `rgb(${r}, ${g}, ${b})`, opacity: a };
+        }
+
+        if (typeof haloColor === 'string') {
+            const rgbaMatch = haloColor.match(/^rgba\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)$/i);
+            if (rgbaMatch) {
+                return { color: `rgb(${rgbaMatch[1]}, ${rgbaMatch[2]}, ${rgbaMatch[3]})`, opacity: parseFloat(rgbaMatch[4]) };
+            }
+            return { color: haloColor, opacity: 1 };
+        }
+
+        return { color: '#ffffff', opacity: 1 };
+    }
+
+    /**
+     * Pick the closest halo-blur filter id that SVGRenderer pre-defines.
+     *
+     * Whenever a halo is present, we apply at least a small amount of blur
+     * (MIN_HALO_BLUR_PX) to mimic the inherent edge softness of Mapbox's SDF
+     * text renderer. Without this, layers that don't explicitly set
+     * text-halo-blur (most road label layers) get a razor-sharp SVG stroke,
+     * which is the "harsher / sharper" look users see in exports.
+     *
+     * The filter ids correspond to the blurValues list in
+     * SVGRenderer._buildHaloFilterDefs.
+     */
+    static pickHaloBlurFilterId(haloBlurPx) {
+        const MIN_HALO_BLUR_PX = 0.3;
+        let value = Number(haloBlurPx);
+        if (!isFinite(value) || value < 0) value = 0;
+        value = Math.max(value, MIN_HALO_BLUR_PX);
+
+        const choices = [0.3, 0.6, 1.0, 1.5, 2.0];
+        let best = choices[0];
+        let bestDelta = Math.abs(value - best);
+        for (const c of choices) {
+            const d = Math.abs(value - c);
+            if (d < bestDelta) {
+                best = c;
+                bestDelta = d;
+            }
+        }
+        return `halo-blur-${best.toString().replace('.', '_')}`;
     }
 
     // ENHANCED: Check if a feature is actually a label (text) feature
@@ -840,11 +964,14 @@ class FeatureConverter {
         const textOpacity = paint['text-opacity'] !== undefined ? paint['text-opacity'] : 1;
         const textHaloColor = paint['text-halo-color'];
         const textHaloWidth = paint['text-halo-width'] || 0;
+        const textHaloBlur = paint['text-halo-blur'];
         
         // Initialize font manager and process fonts
         const fontManager = this.initializeFontManager();
         let fontFamily = 'Arial, sans-serif';
-        let fontWeight = 'normal';
+        let fontWeight = '400';
+        let fontStyle = 'normal';
+        let measureFontFamily = 'Arial, sans-serif';
         
         if (layout['text-font'] && Array.isArray(layout['text-font'])) {
             // Log detected font for user reference
@@ -864,51 +991,61 @@ class FeatureConverter {
             const processedFont = fontManager.processMapboxFonts(layout['text-font']);
             fontFamily = processedFont.fontFamily;
             fontWeight = processedFont.fontWeight;
+            fontStyle = processedFont.fontStyle;
+            measureFontFamily = processedFont.measureFontFamily;
         }
         
                 // Check for text wrapping based on text-max-width
         const textMaxWidth = layout['text-max-width'];
-        const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId);
+        const textLetterSpacing = typeof layout['text-letter-spacing'] === 'number' ? layout['text-letter-spacing'] : 0;
+        const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
+            measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
+        });
         
-        // Create the text element with rotation and improved rendering
-        let textElement = `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" 
-            text-anchor="middle" 
-            dominant-baseline="middle"
-            text-rendering="geometricPrecision"
-            shape-rendering="geometricPrecision"
-            style="font-smooth: always; -webkit-font-smoothing: antialiased;"
-            font-family="${fontFamily}"
-            font-size="${fontSize}"
-            font-weight="${fontWeight}"
-            fill="${textColor}"
-            fill-opacity="${textOpacity}"`;
-        
-        // Add rotation transform if there's a significant angle
-        if (Math.abs(rotationAngle) > 1) {
-            textElement += ` transform="rotate(${rotationAngle.toFixed(1)} ${x.toFixed(2)} ${y.toFixed(2)})"`;
-        }
-        
-        // Add text halo/stroke if specified
-        if (textHaloWidth > 0 && textHaloColor) {
-            textElement += ` stroke="${textHaloColor}" stroke-width="${(textHaloWidth * 2).toFixed(1)}" stroke-opacity="0.9" paint-order="stroke fill"`;
-        }
-        
-        textElement += `>`;
-        
-        // Handle wrapped text with tspan elements
+        // Build inner text content once so it can be reused by halo + fill passes
+        let innerContent;
         if (wrappedText.length > 1) {
-            const lineHeight = fontSize * 1.2; // Standard line height
-            
-            wrappedText.forEach((line, index) => {
-                textElement += `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`;
-            });
+            const lineHeight = fontSize * 1.2;
+            innerContent = wrappedText.map((line, index) =>
+                `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`
+            ).join('');
         } else {
-            textElement += text;
+            innerContent = wrappedText[0] !== undefined ? wrappedText[0] : text;
         }
-        
-        textElement += `</text>`;
-        
-        return textElement;
+
+        const transformAttr = (Math.abs(rotationAngle) > 1)
+            ? ` transform="rotate(${rotationAngle.toFixed(1)} ${x.toFixed(2)} ${y.toFixed(2)})"`
+            : '';
+
+        const letterSpacingPx = textLetterSpacing && fontSize ? (textLetterSpacing * fontSize) : 0;
+        const baseAttrs = `x="${x.toFixed(2)}" y="${y.toFixed(2)}"`
+            + ` text-anchor="middle" dominant-baseline="middle"`
+            + ` text-rendering="geometricPrecision" shape-rendering="geometricPrecision"`
+            + ` style="font-smooth: always; -webkit-font-smoothing: antialiased;"`
+            + ` font-family="${fontFamily}" font-size="${fontSize}"`
+            + ` font-weight="${fontWeight}" font-style="${fontStyle}"`
+            + (letterSpacingPx ? ` letter-spacing="${letterSpacingPx.toFixed(2)}"` : '')
+            + transformAttr;
+
+        const fillAttrs = `fill="${textColor}" fill-opacity="${textOpacity}"`;
+
+        const hasHalo = textHaloWidth > 0 && textHaloColor;
+        const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
+
+        if (hasHalo) {
+            const halo = FeatureConverter.resolveHaloPaint(textHaloColor);
+            const haloAttrs = `stroke="${halo.color}" stroke-width="${(textHaloWidth * 2).toFixed(1)}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
+
+            if (haloBlurFilter) {
+                return `<g class="line-label">`
+                    + `<text ${baseAttrs} fill="none" ${haloAttrs} filter="url(#${haloBlurFilter})">${innerContent}</text>`
+                    + `<text ${baseAttrs} ${fillAttrs}>${innerContent}</text>`
+                    + `</g>`;
+            }
+            return `<text ${baseAttrs} ${fillAttrs} ${haloAttrs} paint-order="stroke fill">${innerContent}</text>`;
+        }
+
+        return `<text ${baseAttrs} ${fillAttrs}>${innerContent}</text>`;
     }
 
     // ENHANCED: Detect if this is an island landmass feature that needs special visibility handling
@@ -962,124 +1099,194 @@ class FeatureConverter {
         );
     }
 
-    // Static method to check if text should be wrapped based on Mapbox properties
+    // Decide whether a label is allowed to wrap based on Mapbox layout
+    // properties. Wrapping is then triggered by actual measured width vs
+    // text-max-width (in wrapText below); this method only handles the
+    // semantic prerequisites.
+    //
+    // Note: text-line-height is NOT a wrap signal (Mapbox defaults it to 1.2
+    // for every label). It only controls vertical spacing once wrapping has
+    // already been decided.
     static shouldWrapText(layout, properties, layerId, actualText = null) {
-        // Check for explicit text-wrap property
+        // Explicit opt-out
         if (layout['text-wrap'] === false || layout['text-wrap'] === 'none') {
             return false;
         }
-        
-        // Use the actual text being rendered, not just properties.name
+
         const text = actualText || properties.name || '';
-        
-        // Check if there's a text-line-height property (indicates multi-line intent)
-        const hasLineHeight = layout['text-line-height'] && layout['text-line-height'] > 1;
-        
-        // Check if there's a text-max-width property (key indicator of wrapping intent)
+        if (!text) return false;
+
+        // Embedded newlines are an explicit wrap from the data
+        if (text.includes('\n')) return true;
+
         const textMaxWidth = layout['text-max-width'];
-        const hasMaxWidth = textMaxWidth && typeof textMaxWidth === 'number' && textMaxWidth > 0;
-        
-        // BETTER APPROACH: Use text_anchor to determine wrapping intent
-        const textAnchor = properties.text_anchor;
-        const anchorIndicatesWrapping = textAnchor === 'bottom' || textAnchor === 'top';
-        
-        // Check for natural break points in the text
-        const hasNaturalBreaks = text && (text.includes('-') || text.includes(' '));
-        
-        // Simple logic: If Mapbox set the anchor for multi-line positioning AND there are natural breaks, wrap it
-        const shouldWrap = (
-            hasLineHeight || // Explicit line height indicates multi-line
-            (anchorIndicatesWrapping && hasNaturalBreaks && hasMaxWidth) // Anchor + breaks + max-width = wrapping intent
-        );
-        
-        return shouldWrap;
+        const hasMaxWidth = typeof textMaxWidth === 'number' && textMaxWidth > 0;
+        const hasNaturalBreaks = text.includes(' ') || text.includes('-');
+
+        return hasMaxWidth && hasNaturalBreaks;
     }
 
-    // Static method to wrap text based on max-width (like Mapbox does)
-    static wrapText(text, maxWidth, fontSize, layout, properties, layerId) {
-        // Check if this text should be wrapped at all
+    /**
+     * Wrap text the way Mapbox does, by actually measuring glyph widths with
+     * the same font that will be rendered. This replaces the previous
+     * character-count heuristic which couldn't distinguish narrow vs wide
+     * glyphs and produced both over- and under-wrapping.
+     *
+     * fontSpec is { measureFontFamily, fontWeight, fontStyle, letterSpacing }
+     * derived from the Mapbox layer. `letterSpacing` is text-letter-spacing
+     * in em units (default 0) and is essential for the neighbourhood-style
+     * tracked-out labels that Mapbox commonly uses.
+     *
+     * The fonts referenced must have been loaded via
+     * FontManager.ensureFontInDocument before this is called for the widths
+     * to reflect the real font.
+     */
+    static wrapText(text, maxWidth, fontSize, layout, properties, layerId, fontSpec = null) {
         if (!this.shouldWrapText(layout, properties, layerId, text)) {
             return [text];
         }
-        
-        // If no max width is specified, return text as single line
         if (!maxWidth || typeof maxWidth !== 'number') {
             return [text];
         }
-        
-        // Convert em units to approximate character count
-        // This is a rough approximation - Mapbox uses more sophisticated text measurement
-        const approxCharsPerEm = 0.6; // Average character width relative to font size
-        const maxChars = Math.floor(maxWidth * approxCharsPerEm);
-        
-        if (text.length <= maxChars) {
+
+        // Honor explicit \n line breaks first - keep each segment as a line
+        // and recurse so each segment is individually width-checked.
+        if (text.includes('\n')) {
+            const lines = [];
+            for (const segment of text.split('\n')) {
+                const wrapped = this.wrapText(segment, maxWidth, fontSize, layout, properties, layerId, fontSpec);
+                lines.push(...wrapped);
+            }
+            return lines;
+        }
+
+        const fontManager = this.initializeFontManager();
+        const measureFamily = (fontSpec && fontSpec.measureFontFamily) || 'Arial, sans-serif';
+        const measureWeight = (fontSpec && fontSpec.fontWeight) || '400';
+        const measureStyle = (fontSpec && fontSpec.fontStyle) || 'normal';
+        const letterSpacing = (fontSpec && fontSpec.letterSpacing) || 0;
+        const measure = (s) => fontManager.measureTextWidth(s, measureFamily, fontSize, measureWeight, measureStyle, letterSpacing);
+
+        const maxWidthPx = maxWidth * fontSize; // Mapbox text-max-width is in ems
+        const totalWidth = measure(text);
+        if (totalWidth <= maxWidthPx) {
             return [text];
         }
-        
-        // ENHANCED: Smart wrapping for Dutch place names
-        
-        // Special handling for specific patterns
-        if (text.includes('-')) {
-            // For hyphenated names like "Rotterdam-Noord", "Oud-Charlois", wrap at hyphen
-            const parts = text.split('-');
-            if (parts.length === 2) {
-                return [parts[0] + '-', parts[1]];
-            }
+
+        return this._balancedWrap(text, maxWidthPx, measure);
+    }
+
+    /**
+     * Mapbox-style balanced wrap. We first decide how many lines the text
+     * needs (ceil(totalWidth / maxWidth)) and then choose the break points
+     * that minimize line-length variance among the candidate breaks at
+     * whitespace or hyphens. This matches how Mapbox's shaper produces
+     * "OUDE / WESTEN" rather than the greedy "OUDE WESTEN / " (still on one
+     * line because it just barely fits) or "OUDE WES / TEN" (mid-word).
+     */
+    static _balancedWrap(text, maxWidthPx, measure) {
+        // Tokenise into atomic chunks. Whitespace is a soft break (consumed
+        // by the wrap). A hyphen is kept on the preceding chunk so
+        // "OUD-IJSSELMONDE" splits at the hyphen as "OUD-" / "IJSSELMONDE".
+        const atoms = [];
+        const re = /([^\s-]+-?)|(\s+)/g;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+            atoms.push({ value: m[0], isBreak: /^\s+$/.test(m[0]) });
         }
-        
-        // For space-separated names, use smarter logic
-        if (text.includes(' ')) {
-            const words = text.split(' ');
-            
-            // Special cases for common Dutch patterns
-            if (words.length === 3 && words[0].toLowerCase() === 'het') {
-                // "Het Lage Land" → ["Het Lage", "Land"]
-                return [words[0] + ' ' + words[1], words[2]];
-            }
-            
-            if (words.length === 2) {
-                // Two words: keep together or split
-                const firstWord = words[0];
-                const secondWord = words[1];
-                
-                // If total length is reasonable, try to keep together first
-                if (text.length <= maxChars * 1.2) {
-                    return [text]; // Keep as single line
-                }
-                
-                // Otherwise split: "Park 16Hoven" → ["Park", "16Hoven"]
-                return [firstWord, secondWord];
-            }
-            
-            // For longer names, use the original algorithm but with better grouping
+        if (atoms.length === 0) return [text];
+
+        // Build chunks (non-whitespace atoms) plus the separator that follows
+        // each. The separator is either ' ' (whitespace was consumed) or ''
+        // (a hyphen-terminated chunk - the hyphen stays with it but no extra
+        // space). A wrap is permitted between any two chunks.
+        const chunks = [];
+        for (let i = 0; i < atoms.length; i++) {
+            const atom = atoms[i];
+            if (atom.isBreak) continue;
+            const nextIsBreak = atoms[i + 1] && atoms[i + 1].isBreak;
+            chunks.push({ text: atom.value, sep: nextIsBreak ? ' ' : '' });
+        }
+        if (chunks.length === 1) return [text];
+
+        const totalWidth = measure(text);
+        let lineCount = Math.max(1, Math.ceil(totalWidth / maxWidthPx));
+        // Cap at chunk count - we can't split into more lines than chunks.
+        lineCount = Math.min(lineCount, chunks.length);
+
+        const targetWidth = totalWidth / lineCount;
+
+        // Helper: given an array of break indices (chunk-after-which-to-break),
+        // return the resulting lines and a "raggedness" cost (sum of squared
+        // distance from targetWidth, plus a penalty for any line that
+        // overflows maxWidthPx).
+        const evalBreaks = (breaks) => {
             const lines = [];
-            let currentLine = '';
-            
-            for (let i = 0; i < words.length; i++) {
-                const word = words[i];
-                const testLine = currentLine ? currentLine + ' ' + word : word;
-                
-                if (testLine.length <= maxChars || currentLine === '') {
-                    currentLine = testLine;
-                } else {
-                    // Current line is full, start a new line
-                    if (currentLine) {
-                        lines.push(currentLine);
-                    }
-                    currentLine = word;
-                }
+            let start = 0;
+            for (const b of breaks) {
+                lines.push(this._joinChunks(chunks, start, b + 1));
+                start = b + 1;
             }
-            
-            // Add the last line if it has content
-            if (currentLine) {
-                lines.push(currentLine);
+            lines.push(this._joinChunks(chunks, start, chunks.length));
+
+            let cost = 0;
+            for (const line of lines) {
+                const w = measure(line);
+                cost += (w - targetWidth) * (w - targetWidth);
+                if (w > maxWidthPx) cost += (w - maxWidthPx) * (w - maxWidthPx) * 4;
             }
-            
-            return lines.length > 0 ? lines : [text];
+            return { lines, cost };
+        };
+
+        // Enumerate combinations of (lineCount-1) break points among
+        // (chunks.length-1) candidate slots. Real labels are tiny (typically
+        // 2-5 chunks), so this is cheap. Cap at 6 chunks to keep it bounded
+        // for pathological cases.
+        const breakSlots = chunks.length - 1;
+        const breakNeeded = lineCount - 1;
+        if (breakNeeded <= 0) return [text];
+
+        const limitedSlots = Math.min(breakSlots, 6);
+        const combinations = this._kSubsets(limitedSlots, breakNeeded);
+
+        let best = null;
+        for (const combo of combinations) {
+            const result = evalBreaks(combo);
+            if (best === null || result.cost < best.cost) best = result;
         }
-        
-        // For single words or other patterns, don't wrap
-        return [text];
+
+        return best ? best.lines : [text];
+    }
+
+    static _joinChunks(chunks, fromIdx, toIdx) {
+        let s = '';
+        for (let i = fromIdx; i < toIdx; i++) {
+            s += chunks[i].text;
+            // Drop the separator on the last chunk of the line so the line
+            // doesn't end in a trailing space.
+            if (i < toIdx - 1) s += chunks[i].sep;
+        }
+        return s;
+    }
+
+    /** Return all k-subsets of {0, 1, ..., n-1} as ascending-indexed arrays. */
+    static _kSubsets(n, k) {
+        if (k <= 0) return [[]];
+        if (k > n) return [];
+        const out = [];
+        const recur = (start, picked) => {
+            if (picked.length === k) {
+                out.push(picked.slice());
+                return;
+            }
+            for (let i = start; i < n; i++) {
+                picked.push(i);
+                recur(i + 1, picked);
+                picked.pop();
+            }
+        };
+        recur(0, []);
+        return out;
     }
 
     // Static method to reset font tracking for new export
