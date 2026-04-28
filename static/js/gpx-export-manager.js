@@ -22,6 +22,10 @@ class GPXExportManager {
         return await this.exportManager.saveAsPNG();
     }
 
+    async saveAsPDF() {
+        return await this.exportManager.saveAsPDF();
+    }
+
     async saveAsSVG() {
         return await this.exportManager.saveAsSVG();
     }

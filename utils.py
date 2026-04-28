@@ -86,19 +86,19 @@ def validate_file_extension(filename: Optional[str], allowed_extensions: set) ->
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-def sanitize_search_input(name: Optional[str]) -> str:
-    """Sanitize search input to prevent injection attacks."""
+def clamp_search_input(name: Optional[str], max_length: int = 100) -> str:
+    """Normalise user-supplied search input.
+
+    Trims whitespace and clamps the length. Output is then either passed to
+    Jinja (which auto-escapes) or to ``urllib.parse.quote_plus`` for outbound
+    requests, both of which are safe by construction. Earlier revisions used
+    a denylist of "dangerous" characters here, but denylist-based sanitisers
+    are leaky against Unicode look-alikes and provide no real defence on top
+    of escaping that already happens downstream.
+    """
     if not name:
         return ""
-
-    # Remove potentially dangerous characters
-    dangerous_chars = ['<', '>', '"', "'", '&', ';', '(', ')', '|', '`']
-    sanitized = name
-    for char in dangerous_chars:
-        sanitized = sanitized.replace(char, '')
-
-    # Limit length
-    return sanitized.strip()[:100]
+    return name.strip()[:max_length]
 
 def combine_and_sort_results(results_list: List[List[Dict[str, Any]]],
                            sort_key: str = 'date') -> List[Dict[str, Any]]:

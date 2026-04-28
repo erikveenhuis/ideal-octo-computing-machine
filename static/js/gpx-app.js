@@ -176,6 +176,14 @@ class GPXApp {
             this.handleSavePNG();
         });
 
+        // Save PDF button
+        const savePDFBtn = document.getElementById('savePDFBtn');
+        if (savePDFBtn) {
+            savePDFBtn.addEventListener('click', () => {
+                this.handleSavePDF();
+            });
+        }
+
         // Save SVG button
         document.getElementById('saveSVGBtn').addEventListener('click', () => {
             this.handleSaveSVG();
@@ -531,6 +539,29 @@ class GPXApp {
         } finally {
             // Remove loading state
             if (window.loadingStates) {
+                window.loadingStates.removeButtonLoading(saveBtn);
+            }
+        }
+    }
+
+    async handleSavePDF() {
+        const saveBtn = document.getElementById('savePDFBtn');
+        
+        if (window.loadingStates && saveBtn) {
+            window.loadingStates.setButtonLoading(saveBtn, 'Building PDF...');
+        }
+        
+        try {
+            if (!this.exportManager) {
+                this.exportManager = new GPXExportManager(this.mapManager);
+            }
+            
+            await this.exportManager.saveAsPDF();
+        } catch (error) {
+            console.error('Error during PDF save:', error);
+            showToast('PDF export failed - please try again', 'error');
+        } finally {
+            if (window.loadingStates && saveBtn) {
                 window.loadingStates.removeButtonLoading(saveBtn);
             }
         }

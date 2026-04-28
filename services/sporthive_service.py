@@ -8,7 +8,7 @@ from flask import current_app
 import requests
 
 from config import APIConstants
-from utils import log_api_request, log_api_error, sanitize_search_input, safe_int
+from utils import log_api_request, log_api_error, clamp_search_input, safe_int
 from error_handlers import APIError, ValidationError
 
 
@@ -79,11 +79,11 @@ class SporthiveService:
             ) from e
 
     def _validate_name(self, name: str) -> str:
-        """Validate and sanitize the search name."""
-        sanitized_name = sanitize_search_input(name)
-        if not sanitized_name or len(sanitized_name) < APIConstants.MIN_SEARCH_INPUT_LENGTH:
+        """Validate and normalise the search name."""
+        clamped_name = clamp_search_input(name)
+        if not clamped_name or len(clamped_name) < APIConstants.MIN_SEARCH_INPUT_LENGTH:
             raise ValidationError("Name cannot be empty", "name")
-        return sanitized_name
+        return clamped_name
 
     def _validate_year(self, year: Optional[int]) -> Optional[int]:
         """Validate the optional year parameter."""

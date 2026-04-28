@@ -91,15 +91,20 @@ class DeploymentService:
             self._log_info("Found git repository in current directory")
             return
 
-        # Search for git repository in parent directories
+        # Search for git repository in parent directories. We compare each
+        # iteration against the previous parent rather than ``current_dir`` so
+        # the walk terminates at the filesystem root (where ``dirname('/')``
+        # is ``/``) instead of looping forever.
         self._log_info("Not in a git repository, searching parent directories...")
         parent_dir = os.path.dirname(current_dir)
+        prev_dir = current_dir
 
-        while parent_dir != current_dir:
+        while parent_dir != prev_dir:
             if os.path.exists(os.path.join(parent_dir, '.git')):
                 self._log_info(f"Found git repository in: {parent_dir}")
                 os.chdir(parent_dir)
                 return
+            prev_dir = parent_dir
             parent_dir = os.path.dirname(parent_dir)
 
         raise GitOperationError("Could not find git repository", repository_path=os.getcwd())

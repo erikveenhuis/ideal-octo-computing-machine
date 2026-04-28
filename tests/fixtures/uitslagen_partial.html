@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Zoekresultaten - uitslagen.nl</title></head>
+<body>
+<!-- Section missing the event row -->
+<div class="zk-kader">
+  <table>
+    <tr class="db"><td>10 km</td></tr>
+    <tr><td>1</td><td>Loose Row</td><td>X</td><td>00:30:00</td><td>00:30:00</td><td>20 km/u</td><td>03:00 min/km</td></tr>
+  </table>
+</div>
+
+<!-- Section with valid event but no race row -->
+<div class="zk-kader">
+  <table>
+    <tr class="zk-evnm"><th colspan="6">2024-04-01 Loose Event</th></tr>
+    <tr><td>1</td><td>Loose Row</td></tr>
+  </table>
+</div>
+
+<!-- Section with malformed event header (single token, no date) -->
+<div class="zk-kader">
+  <table>
+    <tr class="zk-evnm"><th colspan="6">SingleTokenEventName</th></tr>
+    <tr class="db"><td>5K</td></tr>
+  </table>
+</div>
+
+<!-- One fully valid section so the test sees at least one parsed result -->
+<div class="zk-kader">
+  <table>
+    <tr class="zk-evnm"><th colspan="6">2024-05-05 Utrecht 5K</th></tr>
+    <tr class="db"><td>5 km</td></tr>
+    <tr class="lb"><th>Pos</th><th>Naam</th><th>Vereniging</th><th>Gun</th><th>Chip</th><th>km/u</th><th>min/km</th></tr>
+    <tr>
+      <td>10</td>
+      <td>Erik Veenhuis</td>
+      <td>AV Test</td>
+      <td>00:21:00</td>
+      <td>00:20:55</td>
+      <td>14.40 km/u</td>
+      <td>04:10 min/km</td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>

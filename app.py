@@ -6,63 +6,16 @@ This application provides:
 - GPX file upload and processing with route visualization
 - Image transformation services for background removal
 - API endpoints for health checks and webhooks
+
+Note: code-update / dependency-install logic intentionally lives in
+``services.deployment_service`` and is invoked from the GitHub webhook
+handler. It MUST NOT run at module import time, otherwise a broken release
+can leave the WSGI worker importing stale code mid-update.
 """
 import hashlib
 import hmac
 import os
-import subprocess
-from datetime import datetime
-
-# Environment-aware startup operations
-if __name__ == '__main__':
-    try:
-        # Only run auto-update in production environment
-        environment = os.environ.get('FLASK_ENV', 'development')
-        auto_update = os.environ.get('AUTO_UPDATE_ON_STARTUP', 'false').lower() == 'true'
-
-        if environment == 'production' or auto_update:
-            print("Starting up - checking for updates...")
-
-            # Git pull latest changes
-            if os.path.exists('.git'):
-                print("Pulling latest code...")
-                result = subprocess.run(['git', 'pull'], capture_output=True, text=True, check=False)
-                if result.returncode == 0:
-                    print("Git pull successful")
-                    if result.stdout.strip() and result.stdout.strip() != "Already up to date.":
-                        print(f"Git output: {result.stdout}")
-                else:
-                    print(f"Git pull failed: {result.stderr}")
-            else:
-                print("Not in a git repository, skipping git pull")
-
-            # Install/update dependencies BEFORE imports that might fail
-            if os.path.exists('requirements.txt'):
-                print("Installing/updating dependencies...")
-                VENV_PIP = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
-
-                # Check if virtual environment pip exists, fallback to system pip
-                if not os.path.exists(VENV_PIP):
-                    print(f"Virtual environment pip not found at {VENV_PIP}, using system pip")
-                    VENV_PIP = 'pip'
-
-                result = subprocess.run(
-                    [VENV_PIP, 'install', '-r', 'requirements.txt'],
-                    capture_output=True, text=True, check=False
-                )
-
-                if result.returncode == 0:
-                    print("Dependencies installed successfully")
-                else:
-                    print(f"Pip install failed: {result.stderr}")
-            else:
-                print("No requirements.txt found, skipping dependency installation")
-        else:
-            print(f"Starting in {environment} mode - skipping auto-update")
-
-    except Exception as e:
-        print(f"Startup update failed: {str(e)}")
-        print("Continuing with app startup...")
+from datetime import datetime, timezone
 
 from flask import Flask, render_template, request, jsonify
 from flask_limiter import Limiter
@@ -74,7 +27,7 @@ from PIL import Image  # Still needed for logging available decoders
 # Import our custom modules
 from config import config, APIConstants
 from utils import (setup_logging, log_request_metrics,
-                   safe_int, sanitize_search_input, combine_and_sort_results,
+                   safe_int, clamp_search_input, combine_and_sort_results,
                    validate_year_range, validate_github_webhook_payload, get_git_commit_info)
 from error_handlers import register_error_handlers
 from exceptions import APIError, ValidationError, FileUploadError
@@ -90,7 +43,13 @@ def create_app(config_name=None):
 
     # Load configuration
     config_name = config_name or os.environ.get('FLASK_CONFIG', 'default')
-    flask_app.config.from_object(config[config_name])
+    config_class = config[config_name]
+    flask_app.config.from_object(config_class)
+
+    # Run environment-specific config validation. ProductionConfig.validate()
+    # raises ConfigurationError if SECRET_KEY is missing or still the dev
+    # fallback so misconfigured production deploys fail loud at startup.
+    config_class.validate(flask_app)
 
     # Initialize extensions
     csrf_protect = CSRFProtect(flask_app)
@@ -155,6 +114,9 @@ deployment_service = DeploymentService(
 if not app.config['REPLICATE_API_TOKEN']:
     app.logger.warning("REPLICATE_API_TOKEN not configured. Image transformation will be disabled.")
 
+# Pillow 12 lazy-loads its plugin registry. Prime it before logging so the
+# log line reflects the actual list of decoders rather than an empty dict.
+Image.init()
 app.logger.info(f"Available image decoders: {list(Image.OPEN.keys())}")
 
 # Wrapper functions for backward compatibility and service integration
@@ -184,7 +146,7 @@ def search():
     if not name:
         raise ValidationError('Please enter a name to search', 'name')
 
-    name = sanitize_search_input(name)
+    name = clamp_search_input(name)
     year_int = _validate_year_input(year) if year else None
 
     try:
@@ -295,26 +257,37 @@ def upload_gpx():
         # Return JSON error instead of letting Flask return HTML error page
         return jsonify({'error': f'GPX upload failed: {str(e)}'}), 500
 
-def verify_github_webhook(payload, signature):
-    """Verify that the webhook request came from GitHub."""
-    if not signature:
-        app.logger.warning("Webhook received without signature")
-        return False
+def verify_github_webhook(payload, signature_256, signature_1):
+    """Verify that the webhook request came from GitHub.
 
-    # Get the secret from configuration
+    GitHub sends both ``X-Hub-Signature-256`` (HMAC-SHA256) and the legacy
+    ``X-Hub-Signature`` (HMAC-SHA1). We prefer SHA-256 and only fall back
+    to SHA-1 when the SHA-256 header is absent (e.g. very old self-hosted
+    GitHub Enterprise installations).
+    """
     secret = app.config['GITHUB_WEBHOOK_SECRET']
     if not secret:
         app.logger.error("GitHub webhook secret not configured")
         return False
 
-    # Calculate expected signature
-    expected_signature = 'sha1=' + hmac.new(
-        secret.encode('utf-8'),
-        payload,
-        hashlib.sha1
-    ).hexdigest()
+    if signature_256:
+        expected = 'sha256=' + hmac.new(
+            secret.encode('utf-8'), payload, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(signature_256, expected)
 
-    return hmac.compare_digest(signature, expected_signature)
+    if signature_1:
+        app.logger.warning(
+            "Webhook verified using legacy SHA-1 signature; "
+            "consider upgrading the GitHub webhook to SHA-256."
+        )
+        expected = 'sha1=' + hmac.new(
+            secret.encode('utf-8'), payload, hashlib.sha1
+        ).hexdigest()
+        return hmac.compare_digest(signature_1, expected)
+
+    app.logger.warning("Webhook received without signature")
+    return False
 
 @app.route('/webhook', methods=['POST'])
 @csrf.exempt
@@ -323,11 +296,13 @@ def verify_github_webhook(payload, signature):
 def github_webhook():
     """Handle GitHub webhook events."""
     try:
-        # Get the signature from the request headers
-        signature = request.headers.get('X-Hub-Signature')
+        # GitHub sends both signatures; prefer SHA-256 when present.
+        signature_256 = request.headers.get('X-Hub-Signature-256')
+        signature_1 = request.headers.get('X-Hub-Signature')
 
-        # Verify the signature
-        if not verify_github_webhook(request.get_data(), signature):
+        if not verify_github_webhook(
+            request.get_data(), signature_256, signature_1
+        ):
             app.logger.warning(f"Invalid webhook signature from {request.remote_addr}")
             return jsonify({'error': 'Invalid signature'}), 401
 
@@ -366,10 +341,10 @@ def github_webhook():
 
         return jsonify({'message': 'Webhook received'}), 200
 
-    except Exception as e:
-        print(f"Webhook error: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Send the full traceback through the rotating logger rather than
+        # printing it to stdout, which is invisible in production.
+        app.logger.exception("Webhook processing failed")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/image-transform')
@@ -417,7 +392,7 @@ def health_check():
     git_info = get_git_commit_info()
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'version': '1.0.0',
         'git': {
             'commit': git_info.get('short_hash'),
@@ -433,7 +408,7 @@ def detailed_health_check():
     git_info = get_git_commit_info()
     health_status = {
         'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'version': '1.0.0',
         'git': {
             'commit': git_info.get('hash'),
@@ -482,17 +457,23 @@ def version_info():
         'date': git_info.get('date'),
         'branch': git_info.get('branch'),
         'author': git_info.get('author'),
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     })
 
-# Actually run the app when this script is executed directly
+# Actually run the app when this script is executed directly. This entrypoint
+# is for local development only; production runs under a WSGI server (Gunicorn
+# / uWSGI / PythonAnywhere) which imports ``app`` directly.
 if __name__ == '__main__':
     # Ensure required directories exist
     for directory in ['templates', 'logs']:
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-    # Run the application
-    app.run(debug=app.config.get('DEBUG', False),
-            host='0.0.0.0',
-            port=int(os.environ.get('PORT', 8000)))
+    # Default to loopback to avoid accidentally exposing the dev server on the
+    # LAN. Set HOST=0.0.0.0 explicitly when you actually want that (e.g. when
+    # testing from another device on the same network).
+    app.run(
+        debug=app.config.get('DEBUG', False),
+        host=os.environ.get('HOST', '127.0.0.1'),
+        port=int(os.environ.get('PORT', 8000)),
+    )

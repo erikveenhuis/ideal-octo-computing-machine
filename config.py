@@ -5,16 +5,24 @@ This module contains all configuration classes, constants, and settings
 for the sports results application.
 """
 import os
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from flask import Flask
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Sentinel that marks the dev fallback secret. ProductionConfig.validate()
+# rejects this value so a misconfigured prod deploy fails loud.
+_DEV_SECRET_FALLBACK = 'dev-key-change-in-production-please'  # nosec B105
+
 class Config:
     """Base configuration class."""
     # Flask Core Settings
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-change-in-production-please')
+    SECRET_KEY = os.environ.get('SECRET_KEY', _DEV_SECRET_FALLBACK)
 
     # API Tokens
     REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
@@ -93,6 +101,11 @@ class Config:
     WSGI_FILE_PATH = os.environ.get('WSGI_FILE_PATH')
     VENV_PIP_PATH = os.environ.get('VENV_PIP_PATH')
 
+    @classmethod
+    def validate(cls, app: 'Flask') -> None:  # noqa: ARG003
+        """Validate runtime configuration. Override in subclasses to add
+        environment-specific checks. The base implementation is a no-op."""
+
 class DevelopmentConfig(Config):
     """Development configuration."""
     DEBUG = True
@@ -110,6 +123,24 @@ class ProductionConfig(Config):
     # Production deployment paths (PythonAnywhere)
     WSGI_FILE_PATH = '/var/www/erikveenhuis_pythonanywhere_com_wsgi.py'
     VENV_PIP_PATH = '/home/erikveenhuis/.virtualenvs/my-flask-app/bin/pip'
+
+    @classmethod
+    def validate(cls, app: 'Flask') -> None:
+        """Production-only configuration checks.
+
+        Fails loud at startup if the deploy is missing a real ``SECRET_KEY``
+        (or is still using the development fallback). A missing key would
+        silently cause every session/CSRF token to be guessable in prod.
+        """
+        from exceptions import ConfigurationError
+
+        secret = app.config.get('SECRET_KEY')
+        if not secret or secret == _DEV_SECRET_FALLBACK:
+            raise ConfigurationError(
+                "SECRET_KEY environment variable must be set to a strong "
+                "random value in production",
+                config_key='SECRET_KEY',
+            )
 
 class TestingConfig(Config):
     """Testing configuration."""

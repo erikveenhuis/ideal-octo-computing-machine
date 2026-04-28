@@ -66,11 +66,42 @@ This is a simple web application built with Python and Flask that allows users t
 
 This project maintains high code quality standards:
 
-- **Pylint Score**: 10.0/10.0 ✅
-- **Automated Quality Checks**: GitHub Actions CI/CD pipeline
+- **Pylint**: 9.98/10 (CI gate: `--fail-under=8.0`)
+- **Pytest**: 180+ tests, ~88% line coverage (CI gate: `--cov-fail-under=80`)
+- **Automated Quality Checks**: GitHub Actions CI/CD pipeline (Python 3.14)
 - **Local Quality Tools**: Run `./scripts/quality_check.sh`
 
 See [CODE_QUALITY.md](CODE_QUALITY.md) for detailed information about code quality standards and tools.
+
+## Running Tests
+
+```bash
+# Install dev dependencies (once)
+pip install -r requirements-dev.txt
+
+# Run the full test suite
+pytest
+
+# With coverage
+pytest --cov=. --cov-report=term-missing
+```
+
+The suite mocks all external HTTP traffic (via `requests-mock`) and the
+Replicate / subprocess boundaries, so it runs offline in well under a second.
+
+## Configuration
+
+The application reads configuration from environment variables, optionally
+loaded from a local `.env` file. Notable variables:
+
+| Variable | Required for prod | Purpose |
+|---|---|---|
+| `SECRET_KEY` | **yes** | Flask session / CSRF secret. `ProductionConfig` raises `ConfigurationError` at startup if this is unset. |
+| `MAPBOX_ACCESS_TOKEN` | yes (for `/gpx`) | Mapbox GL JS token for the route viewer. |
+| `REPLICATE_API_TOKEN` | yes (for `/image-transform`) | Replicate API token used by the background-removal flow. |
+| `GITHUB_WEBHOOK_SECRET` | yes (for `/webhook`) | HMAC secret for verifying GitHub push webhooks (SHA-256 preferred, SHA-1 supported as legacy fallback). |
+| `FLASK_CONFIG` | no | One of `development` (default), `production`, `testing`. |
+| `HOST` / `PORT` | no | Bind host / port for the local dev server. Defaults: `127.0.0.1:8000`. |
 
 ## Notes
 

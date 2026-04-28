@@ -73,9 +73,9 @@ class GPXMapManager {
             this.map.addImage(id, { width, height, data });
         });
 
-        // Add navigation controls (without compass)
+        // Add navigation controls (with compass)
         this.map.addControl(new mapboxgl.NavigationControl({
-            showCompass: false
+            showCompass: true
         }));
 
         // Handle style data events
