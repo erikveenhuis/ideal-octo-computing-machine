@@ -847,6 +847,13 @@ class GPXApp {
         const doc = parser.parseFromString(base.rawSvg, 'image/svg+xml');
         const svgEl = doc.documentElement;
 
+        // Pull the Thrucut group(s) out of the overlay tree so the export
+        // pipeline can emit them as separate top-level <g> layers (see
+        // OverlayCutExtractor for the rationale). After this call, any
+        // user-entered text we append below cannot accidentally land inside
+        // a cut layer.
+        const cutLayers = OverlayCutExtractor.extractCutLayers(svgEl);
+
         // Remove existing text nodes to replace with user content
         svgEl.querySelectorAll('text').forEach(node => {
             if (node.parentNode) {
@@ -882,10 +889,33 @@ class GPXApp {
         ]));
 
         const serializer = new XMLSerializer();
-        const fullSVG = serializer.serializeToString(svgEl);
+        // For the on-screen preview (data: URI <img>) we want the full
+        // overlay including the Thrucut paths so the user can still see the
+        // cut outline in the editor. fullSVG is rebuilt from a cloned tree
+        // that re-includes the cut groups; svgEl itself has them removed so
+        // innerContent / cutLayers stay separated for the export.
+        const previewClone = svgEl.cloneNode(true);
+        for (const layer of cutLayers) {
+            const g = doc.createElementNS('http://www.w3.org/2000/svg', 'g');
+            for (const [name, value] of Object.entries(layer.attrs)) {
+                g.setAttribute(name, value);
+            }
+            g.innerHTML = layer.innerHTML;
+            previewClone.appendChild(g);
+        }
+        const fullSVG = serializer.serializeToString(previewClone);
+
         const overlayData = {
             viewBox: this.parseViewBox(svgEl.getAttribute('viewBox')) || base.viewBox,
+            // Overlay content with the Thrucut group(s) removed, so the
+            // export pipeline can render those separately as top-level
+            // layers (see svg-renderer.js).
             innerContent: svgEl.innerHTML,
+            // Cut layers as { attrs, innerHTML } - the renderer emits each
+            // as a top-level <g> with the overlay transform merged into the
+            // attribute list. This keeps Illustrator treating each as its
+            // own named layer in the Layers panel.
+            cutLayers,
             fullSVG
         };
 

@@ -195,18 +195,53 @@ class SVGRenderer {
             }
         }
 
-        // Add optional overlay layer after map features so it renders on top
-        if (overlayData && overlayData.innerContent) {
+        // Add optional overlay after map features so it renders on top.
+        //
+        // The overlay's Thrucut cut paths are emitted as SEPARATE top-level
+        // <g> siblings of the overlay group, each carrying the overlay
+        // transform directly. This is what makes Adobe Illustrator import
+        // Thrucut as its own named layer in the Layers panel - Illustrator
+        // only treats direct children of <svg> as layers, so any extra
+        // wrapping <g> would push the cut group back into nested-group
+        // territory and Illustrator would import it as a Group inside a
+        // layer instead of its own layer.
+        const hasCutLayers = overlayData && Array.isArray(overlayData.cutLayers) && overlayData.cutLayers.length > 0;
+        if (overlayData && (overlayData.innerContent || hasCutLayers)) {
             const viewBox = overlayData.viewBox || { minX: 0, minY: 0, width: width, height: height };
             const scaleX = viewBox.width ? width / viewBox.width : 1;
             const scaleY = viewBox.height ? height / viewBox.height : 1;
             const translateX = -viewBox.minX * scaleX;
             const translateY = -viewBox.minY * scaleY;
+            const overlayTransform = `translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})`;
 
-            svgBody += `  <!-- OVERLAY LAYER -->\n`;
-            svgBody += `  <g class="overlay-layer" transform="translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})">\n`;
-            svgBody += overlayData.innerContent;
-            svgBody += `\n  </g>\n`;
+            if (overlayData.innerContent) {
+                svgBody += `  <!-- OVERLAY LAYER -->\n`;
+                svgBody += `  <g id="Overlay" class="overlay-layer" transform="${overlayTransform}">\n`;
+                svgBody += overlayData.innerContent;
+                svgBody += `\n  </g>\n`;
+            }
+
+            if (hasCutLayers) {
+                svgBody += `  <!-- THRUCUT LAYERS (cut paths for production cutting machines) -->\n`;
+                for (const layer of overlayData.cutLayers) {
+                    // Merge the overlay transform onto whatever transform
+                    // the cut group already had (typically none, but keep
+                    // composition correct just in case).
+                    const existingTransform = (layer.attrs && layer.attrs.transform) ? layer.attrs.transform : '';
+                    const mergedTransform = existingTransform
+                        ? `${overlayTransform} ${existingTransform}`
+                        : overlayTransform;
+                    const attrParts = [];
+                    for (const [name, value] of Object.entries(layer.attrs || {})) {
+                        if (name === 'transform') continue;
+                        attrParts.push(`${name}="${this._escapeAttr(value)}"`);
+                    }
+                    attrParts.push(`transform="${mergedTransform}"`);
+                    svgBody += `  <g ${attrParts.join(' ')}>\n`;
+                    svgBody += layer.innerHTML;
+                    svgBody += `\n  </g>\n`;
+                }
+            }
         }
 
         // Now that featureToSVG has populated usedFonts and any halo-blur
@@ -222,15 +257,29 @@ class SVGRenderer {
 
         const filterDefs = SVGRenderer._buildHaloFilterDefs();
 
+        // The Inkscape namespace is declared here so the Thrucut group
+        // promoted to a real layer in gpx-app.js (inkscape:groupmode="layer",
+        // inkscape:label="Thrucut") is recognised as a cut layer by
+        // Inkscape, Illustrator and most production cutter front-ends.
         const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"
-     xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+     xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
   <title>GPX Route Export - ${new Date().toISOString().split('T')[0]}</title>
   <desc>Vector export of map view centered at ${center.lat.toFixed(6)}, ${center.lng.toFixed(6)} (zoom ${zoom.toFixed(2)}, bearing ${bearing.toFixed(1)}°)</desc>
 ${fontDefinitions}${filterDefs}
 
 ${svgBody}</svg>`;
         return svgContent;
+    }
+
+    /** Minimal XML attribute escaping for safely re-emitting values. */
+    static _escapeAttr(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     /**
