@@ -250,11 +250,37 @@ class FeatureConverter {
     }
 
     static polygonToSVG(coordinates, paint, projection, layerId, sourceLayer, map, isIslandFeature = false, properties = {}) {
-        // Handle exterior ring (first coordinate array)
-        const exteriorRing = coordinates[0];
-        const points = exteriorRing.map(coord => 
-            `${projection.lngToX(coord[0]).toFixed(2)},${projection.latToY(coord[1]).toFixed(2)}`
-        ).join(' ');
+        // Build SVG path data covering the exterior ring AND any interior rings (holes).
+        // Mapbox vector tiles encode islands inside a water polygon as inner rings; if we
+        // only render coordinates[0] (the exterior), the polygon fills over those islands
+        // (e.g. Noordereiland in Rotterdam). Emitting each ring as a subpath with
+        // fill-rule="evenodd" preserves the holes the canvas renderer naturally respects.
+        if (!coordinates || coordinates.length === 0 || !coordinates[0] || coordinates[0].length === 0) {
+            return null;
+        }
+
+        const ringToSubpath = (ring) => {
+            if (!ring || ring.length === 0) return '';
+            const segments = ring.map((coord, idx) => {
+                const x = projection.lngToX(coord[0]).toFixed(2);
+                const y = projection.latToY(coord[1]).toFixed(2);
+                return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+            });
+            return segments.join(' ') + ' Z';
+        };
+
+        const subpaths = [];
+        for (let i = 0; i < coordinates.length; i++) {
+            const subpath = ringToSubpath(coordinates[i]);
+            if (subpath) subpaths.push(subpath);
+        }
+
+        if (subpaths.length === 0) {
+            return null;
+        }
+
+        const pathData = subpaths.join(' ');
+        const hasHoles = coordinates.length > 1;
         
         // Use only the actual paint properties from the style - no overrides
         let fillColor = paint['fill-color'];
@@ -279,7 +305,7 @@ class FeatureConverter {
             // Only log first few island features to avoid spam
             if (!this._islandLogCount) this._islandLogCount = 0;
             if (this._islandLogCount < 2) {
-                console.log(`🏝️ CONVERTING ISLAND LANDMASS: ${layerId} (${exteriorRing.length} coords, ${sourceLayer})`);
+                console.log(`🏝️ CONVERTING ISLAND LANDMASS: ${layerId} (${coordinates[0].length} coords, ${sourceLayer})`);
                 this._islandLogCount++;
             } else if (this._islandLogCount === 2) {
                 console.log(`🏝️ ... (additional island features processed silently)`);
@@ -395,8 +421,13 @@ class FeatureConverter {
             return null;
         }
         
-        let polygonElement = `<polygon points="${points}"`;
-        
+        let polygonElement = `<path d="${pathData}"`;
+
+        // Use evenodd so interior rings (holes) cut out properly
+        if (hasHoles) {
+            polygonElement += ` fill-rule="evenodd"`;
+        }
+
         // Handle fill color - support both string colors and RGBA objects
         if (fillColor) {
             if (typeof fillColor === 'string') {
