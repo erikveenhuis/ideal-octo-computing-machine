@@ -52,9 +52,18 @@ REAL_FIXTURE = REPO_ROOT / "tests" / "files" / "gpx-route-2026-04-29-vector.svg"
 # The Thrucut group's transform reproduces the production SVGRenderer's
 # overlay-fitting matrix (scale to viewBox), so the resulting bbox is
 # rectangular and easy to assert against.
+# NOTE: ``Landuse`` (a basemap layer) is required for the plexi-black
+# pipeline to emit /Separation /White — only Landuse / Water / Roads /
+# Labels groups feed the White plate; ``Overlay`` is preserved as
+# DeviceRGB. Without a basemap group the White plate would be empty
+# and the spot-colour resource would never appear in the PDF, so we
+# always include one in the synthetic fixture.
 _SYNTHETIC_SVG = """\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1100">
   <g id="Background"><rect x="0" y="0" width="850" height="1100" fill="#cce" /></g>
+  <g id="Landuse" class="landuse-layer">
+    <rect x="50" y="50" width="700" height="900" fill="#fafafa" />
+  </g>
   <g id="Overlay" transform="translate(0,0) scale(1.22074, 1.21346)">
     <rect x="100" y="100" width="500" height="700" fill="#abc" />
   </g>

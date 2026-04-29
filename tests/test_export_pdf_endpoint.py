@@ -27,9 +27,17 @@ REAL_FIXTURE = REPO_ROOT / "tests" / "files" / "gpx-route-2026-04-29-vector.svg"
 # Synthetic SVG that exercises the splitter / spot-color pipeline without
 # pulling in the full real-world fixture. Mirrors the structure of the
 # production exporter (top-level layers + a Thrucut group with a transform).
+# NOTE: ``Landuse`` (a basemap layer) is required for the plexi-black
+# pipeline to emit /Separation /White — only Landuse / Water / Roads /
+# Labels groups feed the White plate; everything else stays DeviceRGB.
+# Without a basemap group the White plate would be empty and the
+# spot-colour resource would never appear in the merged PDF.
 _SYNTHETIC_SVG = """\
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1100">
   <g id="Background"><rect x="0" y="0" width="850" height="1100" fill="#cce" /></g>
+  <g id="Landuse" class="landuse-layer">
+    <rect x="50" y="50" width="700" height="900" fill="#fafafa" />
+  </g>
   <g id="Thrucut" data-cut-type="thrucut"
      transform="translate(0,0) scale(1.22074, 1.21346)">
     <path d="M29.3,27.3 H667.6 V877.7 H29.3 Z"

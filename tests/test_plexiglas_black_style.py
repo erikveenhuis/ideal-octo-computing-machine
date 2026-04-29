@@ -102,20 +102,78 @@ def _count_text_operators(doc: pymupdf.Document) -> dict:
     }
 
 
+_FULL_PAGE_FILL_RE = re.compile(
+    rb"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)"
+    rb"\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)"
+    rb"\s+re\s+(f\*?|b\*?|B\*?)\b"
+)
+
+
+def _iter_paint_streams(doc: pymupdf.Document) -> Iterable[bytes]:
+    """Yield every content stream that may carry painted geometry.
+
+    PyMuPDF's ``Page.get_drawings`` does NOT recurse into Form XObjects,
+    so a flood-fill that lives inside a ``/fzFrm0 Do`` reference (which
+    is exactly how ``show_pdf_page`` imports per-plate content) never
+    surfaces there. We side-step that by walking every xref in the
+    document and pulling the raw decompressed stream for anything that
+    is either (a) a Form XObject (``/Subtype /Form``) or (b) a page
+    content stream — i.e. anything that *might* contain the rect+paint
+    operator pair we care about. Cheap and stable; if the document has
+    a flood fill anywhere in its paintable graph it WILL show up here.
+    """
+    for xref in range(1, doc.xref_length()):
+        try:
+            obj = doc.xref_object(xref) or ""
+        except Exception:
+            continue
+        # Form XObjects have an explicit /Subtype /Form. Page content
+        # streams don't carry an xref-level /Subtype so we have to
+        # additionally scoop those up via the page's /Contents entry,
+        # which we do separately below.
+        if "/Subtype /Form" not in obj:
+            continue
+        try:
+            data = doc.xref_stream(xref)
+        except Exception:
+            continue
+        if data:
+            yield data
+    # Plus the page-level content streams themselves.
+    for page in doc:
+        try:
+            yield page.read_contents()
+        except Exception:
+            continue
+
+
 def _has_full_page_fill(doc: pymupdf.Document) -> bool:
-    """Return True if the page carries a drawing whose bbox covers
-    >= 95% of the MediaBox — i.e. a paper-colour background fill that
-    would defeat the "transparent on black plexi" requirement."""
+    """Return True if any paintable stream in ``doc`` carries a
+    rectangle paint operator whose dimensions cover >= 95% of the page
+    MediaBox.
+
+    Detected pattern (PDF content stream syntax):
+
+        <x> <y> <w> <h> re <paint>
+
+    where ``<paint>`` is one of ``f``, ``f*``, ``b``, ``b*``, ``B`` or
+    ``B*``. Clip rects (``re W n`` / ``re W* n``) are intentionally
+    *not* matched — those just establish a clipping region and don't
+    deposit ink.
+    """
     page = doc[0]
     mb = page.mediabox
-    for d in page.get_drawings():
-        if d.get("type") not in ("f", "fs", "f*"):
-            continue
-        rect = d.get("rect")
-        if not rect:
-            continue
-        if rect.width >= mb.width * 0.95 and rect.height >= mb.height * 0.95:
-            return True
+    threshold_w = mb.width * 0.95
+    threshold_h = mb.height * 0.95
+    for stream in _iter_paint_streams(doc):
+        for m in _FULL_PAGE_FILL_RE.finditer(stream):
+            try:
+                w = abs(float(m.group(3)))
+                h = abs(float(m.group(4)))
+            except ValueError:
+                continue
+            if w >= threshold_w and h >= threshold_h:
+                return True
     return False
 
 

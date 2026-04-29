@@ -122,6 +122,33 @@ _SVG_NS: str = "http://www.w3.org/2000/svg"
 #: here so the front-end and back-end agree on what counts as a cut layer.
 _CUT_GROUP_IDS = frozenset({"thrucut", "trucut", "cutcontour", "cut"})
 
+#: Top-level group ids / class tokens that mark a "background" fill — i.e.
+#: a viewport-spanning paper-colour layer that Mapbox's vector style emits
+#: under the actual map content. Forex prints these as visible artwork (the
+#: light-gray paper colour); the Plexi Black White plate must NOT, because
+#: any non-None fill on that plate is repainted to the /White spot at full
+#: tint, which would flood the entire page with white ink and defeat the
+#: "transparent on black plexi" requirement.
+_BACKGROUND_LAYER_IDS = frozenset({"background"})
+_BACKGROUND_LAYER_CLASS_TOKENS = frozenset({"background-layer"})
+
+#: Top-level group ids whose contents are the *basemap* — i.e. the Mapbox
+#: vector style layers that, on a Plexi Black product, must be repainted
+#: onto the /White spot so they print as white ink on the black material.
+#: Anything outside this set (Route, Markers, Overlay, Tekst_laag, …) keeps
+#: its original RGB colours — that mirrors the Adobe Illustrator reference
+#: at ``tests/files/Example plexiglas black endproduct.pdf``, where the
+#: basemap (~28k ops) lives on /Separation /White and the route line plus
+#: overlay text stay in DeviceRGB (``0 0 0 rg`` etc.) so they print as
+#: solid CMYK black on top of the white-inked basemap.
+_WHITE_PLATE_LAYER_IDS = frozenset({"landuse", "water", "roads", "labels"})
+
+#: Class tokens that flag the same basemap layers via ``class=``. Mirrors
+#: the layer-name convention emitted by ``static/js/components/svg-exporter.js``.
+_WHITE_PLATE_LAYER_CLASS_TOKENS = frozenset({
+    "landuse-layer", "water-layer", "roads-layer", "labels-layer",
+})
+
 
 # ---------------------------------------------------------------------------
 # Public dataclasses
@@ -241,16 +268,58 @@ class PDFExportService:
                 "cannot generate a cut PDF without a cut path"
             )
 
+        # Style-specific SVG pruning + splitting.
+        #
+        # Forex pipeline keeps the full art tree as one drawing (the
+        # whole thing prints in DeviceRGB on Forex sheets, including the
+        # paper-colour background).
+        #
+        # Plexi Black needs two surgical changes before svglib parses
+        # the art:
+        #
+        #   1. The viewport background gets stripped (else the whole
+        #      page floods with /White ink — see the magenta-blob bug
+        #      pinned by tests/test_plexiglas_black_style.py::
+        #      _has_full_page_fill).
+        #
+        #   2. The remaining art is split into TWO sub-trees:
+        #        - basemap layers (Landuse, Water, Roads, Labels) →
+        #          rendered then repainted to /Separation /White, so
+        #          they print as white ink on the black plexi.
+        #        - foreground layers (Route, Markers, Overlay,
+        #          Tekst_laag, …) → rendered AS-IS so the route line,
+        #          marker glyphs and overlay text keep their original
+        #          DeviceRGB colours (CMYK black on top of the white-
+        #          inked basemap, mirroring the Adobe Illustrator master
+        #          at tests/files/Example plexiglas black endproduct.pdf
+        #          where ENSCHEDE / 12 april / 42,2 km / S markers are
+        #          all ``0 0 0 rg`` device-RGB and the basemap is the
+        #          one carrying the /CS0 cs spot-colour ops).
+        rgb_overlay_root: Optional[etree._Element] = None
+        if req.style == STYLE_PLEXIGLAS_BLACK:
+            _strip_background_layers(art_root)
+            art_root, rgb_overlay_root = _split_white_plate(art_root)
+
         art_svg = _serialize(art_root)
         thrucut_svg = _serialize(thrucut_root)
 
         try:
             art_drawing = svg2rlg(io.BytesIO(art_svg.encode("utf-8")))
             thrucut_drawing = svg2rlg(io.BytesIO(thrucut_svg.encode("utf-8")))
+            rgb_overlay_drawing = None
+            if rgb_overlay_root is not None:
+                rgb_overlay_svg = _serialize(rgb_overlay_root)
+                rgb_overlay_drawing = svg2rlg(
+                    io.BytesIO(rgb_overlay_svg.encode("utf-8"))
+                )
         except Exception as exc:
             raise PDFExportError(f"svglib failed to parse SVG: {exc}") from exc
         if art_drawing is None or thrucut_drawing is None:
             raise PDFExportError("svglib returned no drawing")
+        if rgb_overlay_root is not None and rgb_overlay_drawing is None:
+            raise PDFExportError(
+                "svglib returned no drawing for the RGB overlay sub-tree"
+            )
 
         # Paint Thrucut spot onto the cut drawing first. We do this here
         # (not inside the per-style branch) because the bbox we need for
@@ -297,6 +366,7 @@ class PDFExportService:
 
         return {
             "art_drawing": art_drawing,
+            "rgb_overlay_drawing": rgb_overlay_drawing,
             "thrucut_drawing": thrucut_drawing,
             "scale_x": scale_x,
             "scale_y": scale_y,
@@ -342,12 +412,16 @@ class PDFExportService:
     # ---------------------------------------------------------------
 
     def _build_plexiglas_black(self, req: ExportRequest, prep: dict) -> ExportResult:
-        # Repaint the entire art drawing onto the White spot color. The
-        # production reference at
-        # tests/files/Example plexiglas black endproduct.pdf places ~53k
-        # fill ops + ~28k tint ops on /Separation /White and only the cut
-        # paths on /Separation /Thrucut, so this is the production-
-        # validated rule: visible content -> White, cut paths -> Thrucut.
+        # Repaint ONLY the basemap (Landuse / Water / Roads / Labels)
+        # onto the /White spot. Foreground layers — Route, Markers,
+        # Overlay, Tekst_laag — were split off into a separate sub-tree
+        # by ``_prepare_drawings`` and are rendered AS-IS, preserving
+        # their DeviceRGB colours. That mirrors the Adobe Illustrator
+        # master at tests/files/Example plexiglas black endproduct.pdf
+        # which has ~28k spot-colour ops on /Separation /White (the
+        # basemap) and a handful of ``0 0 0 rg`` ops in DeviceRGB (the
+        # ENSCHEDE/MARATHON/12 april/42,2 km text and the S-marker
+        # glyph).
         white_spot = PCMYKColorSep(
             *WHITE_SPOT_CMYK,
             spotName=WHITE_SPOT_NAME,
@@ -360,16 +434,25 @@ class PDFExportService:
             prep["tx"], prep["ty"], prep["scale_x"], prep["scale_y"],
             title="GPX route export — White plate",
         )
+        rgb_overlay_pdf: Optional[bytes] = None
+        if prep["rgb_overlay_drawing"] is not None:
+            rgb_overlay_pdf = _render_drawing_to_pdf(
+                prep["rgb_overlay_drawing"],
+                prep["page_w_pt"], prep["page_h_pt"],
+                prep["tx"], prep["ty"], prep["scale_x"], prep["scale_y"],
+                title="GPX route export — RGB overlay",
+            )
         thrucut_pdf = _render_drawing_to_pdf(
             prep["thrucut_drawing"], prep["page_w_pt"], prep["page_h_pt"],
             prep["tx"], prep["ty"], prep["scale_x"], prep["scale_y"],
             title="GPX route export — Thrucut plate",
         )
 
-        merged = _merge_with_two_ocgs(
+        merged = _merge_plexi_plates(
             base_w_pt=prep["page_w_pt"],
             base_h_pt=prep["page_h_pt"],
             white_pdf=white_pdf,
+            rgb_overlay_pdf=rgb_overlay_pdf,
             thrucut_pdf=thrucut_pdf,
         )
 
@@ -439,6 +522,179 @@ def _is_cut_group(element: etree._Element) -> bool:
         return True
     el_id = (element.get("id") or "").strip().lower()
     return el_id in _CUT_GROUP_IDS
+
+
+def _is_viewport_background_rect(element: etree._Element) -> bool:
+    """Return True if ``element`` is a top-level ``<rect>`` that fills the
+    entire viewport — the typical "paper-colour" background Mapbox emits
+    as the very first drawable in its vector style.
+
+    We accept both the percent form (``width="100%" height="100%"``) and
+    explicit forms where the rect's geometry matches the SVG's
+    ``viewBox`` / ``width`` × ``height``. Any other ``<rect>`` (icons,
+    legend boxes, decorative panels) is left alone.
+    """
+    if etree.QName(element).localname != "rect":
+        return False
+    w = (element.get("width") or "").strip()
+    h = (element.get("height") or "").strip()
+    if not w or not h:
+        return False
+    if w.lower() == "100%" and h.lower() == "100%":
+        return True
+    # Match an explicit-pixel rect against the parent <svg>'s viewBox
+    # or width/height. Without a parent we cannot tell, so be safe and
+    # return False.
+    parent = element.getparent()
+    if parent is None or etree.QName(parent).localname != "svg":
+        return False
+    try:
+        rw = float(w)
+        rh = float(h)
+    except ValueError:
+        return False
+    rx = float(element.get("x") or 0.0)
+    ry = float(element.get("y") or 0.0)
+    if rx != 0.0 or ry != 0.0:
+        return False
+    vb = parent.get("viewBox")
+    if vb:
+        parts = vb.replace(",", " ").split()
+        if len(parts) == 4:
+            try:
+                _, _, vw, vh = (float(p) for p in parts)
+                if abs(rw - vw) < 1e-3 and abs(rh - vh) < 1e-3:
+                    return True
+            except ValueError:
+                pass
+    pw = (parent.get("width") or "").strip()
+    ph = (parent.get("height") or "").strip()
+    try:
+        if pw and ph and abs(rw - float(pw)) < 1e-3 and abs(rh - float(ph)) < 1e-3:
+            return True
+    except ValueError:
+        pass
+    return False
+
+
+def _is_background_layer_group(element: etree._Element) -> bool:
+    """Return True if ``element`` is a ``<g>`` flagged as the basemap's
+    background layer (id="Background" / class="background-layer").
+
+    Mirrors the convention emitted by the vector SVG exporter
+    (``static/js/components/svg-exporter.js``) and Mapbox's vector tile
+    style; matched case-insensitively because authoring tools normalise
+    inconsistently.
+    """
+    if etree.QName(element).localname != "g":
+        return False
+    el_id = (element.get("id") or "").strip().lower()
+    if el_id in _BACKGROUND_LAYER_IDS:
+        return True
+    classes = {
+        token
+        for token in (element.get("class") or "").lower().split()
+        if token
+    }
+    return bool(classes & _BACKGROUND_LAYER_CLASS_TOKENS)
+
+
+def _is_white_plate_layer(element: etree._Element) -> bool:
+    """Return True if ``element`` is a top-level ``<g>`` whose id /
+    class marks it as a *basemap* layer (Landuse / Water / Roads /
+    Labels).
+
+    Only direct children of the SVG root are inspected; nested groups
+    inside the basemap layers are NOT separately re-tested because the
+    parent layer's classification covers them.
+    """
+    if etree.QName(element).localname != "g":
+        return False
+    el_id = (element.get("id") or "").strip().lower()
+    if el_id in _WHITE_PLATE_LAYER_IDS:
+        return True
+    classes = {
+        token
+        for token in (element.get("class") or "").lower().split()
+        if token
+    }
+    return bool(classes & _WHITE_PLATE_LAYER_CLASS_TOKENS)
+
+
+def _split_white_plate(
+    art_root: etree._Element,
+) -> Tuple[etree._Element, etree._Element]:
+    """Split ``art_root`` into ``(white_plate_root, rgb_overlay_root)``.
+
+    Both returned roots are independent ``deepcopy`` clones that share
+    the input's namespace, attributes (including ``viewBox``) and
+    ``<defs>``/``<style>``/metadata, so svglib applies identical
+    coordinate transforms to both — the per-axis scale + translation
+    computed once for the Thrucut plate is reused verbatim for these
+    two plates.
+
+    Classification rule:
+
+      - Top-level ``<g>`` children flagged by
+        ``_is_white_plate_layer`` (id / class in
+        ``_WHITE_PLATE_LAYER_IDS`` / ``_WHITE_PLATE_LAYER_CLASS_TOKENS``)
+        go into ``white_plate_root``. These are the basemap layers
+        whose contents will subsequently be repainted onto
+        ``/Separation /White`` so they print as white ink.
+      - Every other top-level child (Route, Markers, Overlay,
+        Tekst_laag, …) goes into ``rgb_overlay_root`` and keeps its
+        original DeviceRGB colours.
+      - ``<defs>`` / ``<style>`` / ``<title>`` / ``<desc>`` /
+        ``<metadata>`` children are duplicated into BOTH roots so
+        any referenced gradients, clip paths, or class-based fill /
+        stroke rules still resolve on either side of the split.
+
+    Caller's tree is left untouched.
+    """
+    white_plate_root = copy.deepcopy(art_root)
+    rgb_overlay_root = copy.deepcopy(art_root)
+
+    _SHARED_LOCALS = ("defs", "style", "title", "desc", "metadata")
+
+    for child in list(white_plate_root):
+        local = etree.QName(child).localname
+        if local in _SHARED_LOCALS:
+            continue
+        if not _is_white_plate_layer(child):
+            white_plate_root.remove(child)
+
+    for child in list(rgb_overlay_root):
+        local = etree.QName(child).localname
+        if local in _SHARED_LOCALS:
+            continue
+        if _is_white_plate_layer(child):
+            rgb_overlay_root.remove(child)
+
+    return white_plate_root, rgb_overlay_root
+
+
+def _strip_background_layers(root: etree._Element) -> None:
+    """Mutate ``root`` to remove every top-level "background" fill node.
+
+    Drops:
+      - direct ``<rect>`` children that flood the SVG viewport (e.g.
+        ``<rect width="100%" height="100%" .../>`` — what Mapbox emits
+        as the paper-colour underlay).
+      - direct ``<g>`` children whose ``id`` or ``class`` marks them as
+        the background layer (``id="Background"`` /
+        ``class="background-layer"``).
+
+    Only top-level children are inspected; nested groups (Landuse,
+    Water, Roads, …) are left alone because they carry the actual
+    visible artwork that should print on the White plate. This matches
+    the production Adobe Illustrator master file at
+    ``tests/files/Example plexiglas black endproduct.pdf`` which has no
+    full-page paint operator on the White plate but does carry tens of
+    thousands of detail-fill ops on it.
+    """
+    for child in list(root):
+        if _is_viewport_background_rect(child) or _is_background_layer_group(child):
+            root.remove(child)
 
 
 def _split_thrucut(
@@ -525,15 +781,25 @@ def _set_spot_color_recursive(node, spot_color: PCMYKColorSep) -> None:
 
 
 def _set_white_spot_recursive(node, spot_color: PCMYKColorSep) -> None:
-    """Repaint every drawable inside the visible-art Drawing on the
+    """Repaint every drawable inside the *basemap* Drawing on the
     White spot color, **preserving stroke-vs-fill semantics**.
 
     Unlike :func:`_set_spot_color_recursive` (which forces stroke-only
-    Thrucut paint), the White plate carries everything visible on the
-    plexi product: filled landuse polygons, stroked road lines, glyph
-    outlines (filled), markers (stroke + fill), the route line
-    (stroked), and so on. Each of those keeps the geometry it was given
-    by the SVG export — only the *colour* is swapped to the White spot.
+    Thrucut paint), the White plate carries the visible *basemap*
+    artwork on the plexi product: filled landuse polygons, stroked
+    road lines, label glyph outlines (filled), water polygons, etc.
+    Each of those keeps the geometry it was given by the SVG export —
+    only the *colour* is swapped to the White spot.
+
+    Foreground layers (Route, Markers, Overlay, …) are NOT routed
+    through this function: ``_split_white_plate`` carves them off
+    into a separate sub-tree before svglib parses anything, so they
+    keep their original DeviceRGB colours (the route line stays its
+    SVG stroke colour, marker glyphs and overlay text stay
+    ``0 0 0 rg`` device-RGB, etc.). That two-plate split is what makes
+    the proof match the Adobe Illustrator reference where the route
+    line and overlay text print as solid black on top of the white-
+    inked basemap.
 
     The rule is therefore:
 
@@ -543,12 +809,6 @@ def _set_white_spot_recursive(node, spot_color: PCMYKColorSep) -> None:
         its colour becomes the White spot
       - None values stay None (a path that was stroke-only stays
         stroke-only on the White plate)
-
-    This mirrors the production reference at
-    ``tests/files/Example plexiglas black endproduct.pdf`` which has
-    ~53k fill ops + a handful of strokes on /Separation /White; both
-    sides of the paint get the spot colour, the one that was absent
-    stays absent.
     """
     if hasattr(node, "strokeColor") and getattr(node, "strokeColor") is not None:
         node.strokeColor = spot_color
@@ -628,51 +888,75 @@ def _merge_with_ocg(art_pdf: bytes, thrucut_pdf: bytes, *, ocg_name: str) -> byt
         art_doc.close()
 
 
-def _merge_with_two_ocgs(
+def _merge_plexi_plates(
     *,
     base_w_pt: float,
     base_h_pt: float,
     white_pdf: bytes,
+    rgb_overlay_pdf: Optional[bytes],
     thrucut_pdf: bytes,
 ) -> bytes:
-    """Build a single-page PDF where:
+    """Build the Plexi Black single-page PDF by stamping every plate
+    onto a fresh page sized ``(base_w_pt, base_h_pt)``.
 
-      - The White plate is stamped first, wrapped in an OCG named "White"
-        with intent "Design".
-      - The Thrucut plate is stamped on top, wrapped in an OCG named
-        "Thrucut" with intent "Design".
+    Stacking order (z-down -> z-up):
 
-    Both plates are imported as Form XObjects via PyMuPDF's
-    ``show_pdf_page``. ``oc=`` attaches each XObject reference to its
-    named OCG so production tools (Acrobat, Illustrator, Enfocus PitStop)
-    can show / hide each plate independently while still producing the
-    correct two-spot-plate separation when sent to the press.
+      1. Basemap plate (White spot) -> visible-art OCG
+      2. RGB overlay plate (Route, Markers, Overlay) -> SAME visible-art OCG
+      3. Thrucut plate (cut path) -> Thrucut OCG
+
+    The basemap and RGB overlay share a single OCG named after
+    ``WHITE_SPOT_NAME`` because production tools (Acrobat, Illustrator,
+    Enfocus PitStop) treat "the visible art" as a single togglable
+    layer; the example reference at
+    ``tests/files/Example plexiglas black endproduct.pdf`` likewise
+    keeps both basemap (~28k spot-colour ops) and overlay text (the
+    ``0 0 0 rg`` device-RGB ENSCHEDE / 12 april / 42,2 km labels) inside
+    a single ``Laag 2`` OCG.
+
+    All plates are imported as Form XObjects via ``show_pdf_page``;
+    ``oc=`` attaches each XObject reference to the named OCG so the
+    layer-toggle still works even though one OCG now spans two plates.
+
+    ``rgb_overlay_pdf`` is optional: if the source SVG has no overlay
+    layers (Route / Markers / Overlay etc.) the caller passes ``None``
+    and that stamp is skipped.
 
     The resulting PDF carries a fresh empty page sized exactly
     ``(base_w_pt, base_h_pt)`` so the merged geometry matches what the
-    per-plate renderer assumed; we don't piggyback on either source PDF
-    as the base because that would conflate one plate's content with the
-    page itself, leaving it un-OCG-wrapped (the bug the original
-    ``_merge_with_ocg`` works around for forex by keeping a single OCG).
+    per-plate renderer assumed; we don't piggyback on any source PDF
+    as the base because that would conflate one plate's content with
+    the page itself, leaving it un-OCG-wrapped.
     """
     out = pymupdf.open()
     page = out.new_page(width=base_w_pt, height=base_h_pt)
 
     white_doc = pymupdf.open(stream=white_pdf, filetype="pdf")
+    rgb_doc = (
+        pymupdf.open(stream=rgb_overlay_pdf, filetype="pdf")
+        if rgb_overlay_pdf is not None
+        else None
+    )
     thrucut_doc = pymupdf.open(stream=thrucut_pdf, filetype="pdf")
     try:
         white_ocg = out.add_ocg(WHITE_SPOT_NAME, on=True, intent="Design")
         thrucut_ocg = out.add_ocg(THRUCUT_SPOT_NAME, on=True, intent="Design")
 
-        # Stamp White first (underneath), then Thrucut on top. Both
-        # source PDFs were rendered with the same canvas CTM at the same
-        # page size, so a 1:1 stamp into ``page.rect`` preserves the
-        # geometry exactly.
+        # Basemap (White spot) underneath, RGB overlay on top of it,
+        # Thrucut on top of everything. All three source PDFs were
+        # rendered with the same canvas CTM at the same page size, so
+        # 1:1 stamps into ``page.rect`` preserve the geometry exactly.
         page.show_pdf_page(
             page.rect, white_doc, 0,
             overlay=False,
             oc=white_ocg,
         )
+        if rgb_doc is not None:
+            page.show_pdf_page(
+                page.rect, rgb_doc, 0,
+                overlay=True,
+                oc=white_ocg,
+            )
         page.show_pdf_page(
             page.rect, thrucut_doc, 0,
             overlay=True,
@@ -681,6 +965,8 @@ def _merge_with_two_ocgs(
         return out.tobytes()
     finally:
         thrucut_doc.close()
+        if rgb_doc is not None:
+            rgb_doc.close()
         white_doc.close()
         out.close()
 
