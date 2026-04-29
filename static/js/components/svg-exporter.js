@@ -9,6 +9,55 @@ class SVGExporter {
 
     async saveAsSVG() {
         try {
+            // "Save SVG" goes through the same per-style pipeline as the
+            // PDF export so a user who picked the plexi-black map style
+            // gets the print-ready SVG (no background rect, outlined text)
+            // even when downloading just the SVG.
+            const style = this._resolveStyle();
+            const svgDocument = await this.buildSVGString(style);
+            if (svgDocument) {
+                console.log('🔄 Downloading SVG...');
+                ExportUtilities.downloadSVG(svgDocument);
+                console.log('✅ Downloaded SVG');
+                showToast('✅ Vector export complete! Your map is now editable SVG format', 'success', 4000);
+            }
+        } catch (error) {
+            console.error('❌ Error during SVG export:', error);
+            console.error('❌ Error stack:', error.stack);
+            showToast('❌ SVG export failed - this feature requires complex vector processing', 'error', 5000);
+        }
+    }
+
+    /**
+     * Resolve the export style from the current map state. Mirrors
+     * ``PDFExporter._resolveStyle`` so both export paths agree on the
+     * style for a given map view; only ``plexiglas_black`` activates the
+     * spot-White / outlined-text / transparent-background pipeline.
+     */
+    _resolveStyle() {
+        const raw = this.mapManager && this.mapManager.currentStyle;
+        if (raw === 'plexiglas_black') return 'plexiglas_black';
+        return 'forex';
+    }
+
+    /**
+     * Build the SVG export string without triggering a download.
+     *
+     * ``style`` selects the print-product pipeline:
+     *   - ``forex`` (default): full-page background rect + live <text>
+     *     for crisp on-paper labels.
+     *   - ``plexiglas_black``: no page background (so the black plexi
+     *     shows through) and every <text>/<tspan> converted to glyph
+     *     <path>s via opentype.js so the cut shop doesn't depend on a
+     *     specific font being installed.
+     *
+     * This is the same vector pipeline used by saveAsSVG, but it returns
+     * the serialised SVG so callers (e.g. the PDF exporter) can post it
+     * to the server as the source-of-truth artwork. Throws on failure so
+     * the caller can decide how to surface the error.
+     */
+    async buildSVGString(style = 'forex') {
+        try {
             console.log('🚀 Starting SVG export...');
             
             // Reset font tracking for this export
@@ -1420,33 +1469,27 @@ class SVGExporter {
             }
 
             // Create SVG document
-            console.log('🔄 Creating SVG document...');
+            console.log(`🔄 Creating SVG document (style=${style})...`);
             const svgDocument = await SVGRenderer.createSVG(
-                organizedFeatures, 
-                bounds, 
-                center, 
-                zoom, 
-                bearing, 
-                canvasWidth, 
-                canvasHeight, 
-                backgroundColor, 
+                organizedFeatures,
+                bounds,
+                center,
+                zoom,
+                bearing,
+                canvasWidth,
+                canvasHeight,
+                backgroundColor,
                 map,
                 usingVisualBounds ? boundsToUse : null,
-                overlayExportData
+                overlayExportData,
+                style
             );
             console.log('✅ Created SVG document');
-            
-            // Download the SVG
-            console.log('🔄 Downloading SVG...');
-            ExportUtilities.downloadSVG(svgDocument);
-            console.log('✅ Downloaded SVG');
-            
-            showToast('✅ Vector export complete! Your map is now editable SVG format', 'success', 4000);
-            
+            return svgDocument;
         } catch (error) {
-            console.error('❌ Error during SVG export:', error);
+            console.error('❌ Error building SVG:', error);
             console.error('❌ Error stack:', error.stack);
-            showToast('❌ SVG export failed - this feature requires complex vector processing', 'error', 5000);
+            throw error;
         }
     }
 }

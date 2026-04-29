@@ -3,7 +3,31 @@
  * Handles creating SVG documents from organized features
  */
 class SVGRenderer {
-    static async createSVG(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map, visualBounds = null, overlayData = null) {
+    /**
+     * Create a serialised SVG export.
+     *
+     * ``style`` selects the print-product pipeline:
+     *   - ``'forex'`` (default): full-page background rect kept; overlay
+     *     <text>/<tspan> outlined to glyph <path>s.
+     *   - ``'plexiglas_black'``: no page-background fill (the black plexi
+     *     shows through); overlay <text>/<tspan> outlined the same way.
+     *
+     * Both styles outline text because the server-side svglib pipeline
+     * cannot register CFF-flavored OpenType fonts (DIN Pro is shipped
+     * as ``OTTO``-signed CFF .otf — ReportLab's ``TTFont`` rejects it,
+     * so svglib silently falls back to Verdana/Helvetica). That fallback
+     * path drops both the typeface AND the bold weight, which is why the
+     * forex export's overlay rendered visibly less bold than the live
+     * canvas. Outlining client-side via opentype.js + the bundled DIN
+     * Pro OTFs guarantees pixel-parity with the canvas and keeps the
+     * cutter / RIP free of any DIN Pro install requirement.
+     *
+     * Anything other than ``'plexiglas_black'`` is treated as forex so
+     * a fresh deploy never silently ships a mis-configured plexi PDF
+     * (transparent background instead of the forex bleed colour).
+     */
+    static async createSVG(organizedFeatures, bounds, center, zoom, bearing, canvasWidth, canvasHeight, backgroundColor, map, visualBounds = null, overlayData = null, style = 'forex') {
+        const isPlexi = style === 'plexiglas_black';
         // FIXED: Use actual canvas dimensions to maintain the same viewport as the map
         // This prevents the export from being zoomed in compared to the canvas
         const width = canvasWidth;
@@ -43,8 +67,8 @@ class SVGRenderer {
 
         // FIXED: Use actual Mapbox style layer order instead of hardcoded order
         // This ensures proper rendering of islands above water features
-        const style = map.getStyle();
-        const styleLayers = style.layers || [];
+        const mapStyle = map.getStyle();
+        const styleLayers = mapStyle.layers || [];
         
         // Get all unique layer types from organized features
         const availableLayerTypes = Object.keys(organizedFeatures).filter(key => 
@@ -116,7 +140,18 @@ class SVGRenderer {
         // @font-face entries to embed. Previously fontDefinitions was built
         // before the loop ran, so first-time exports shipped without the
         // custom fonts at all.
-        let svgBody = `  <!-- Background -->\n  <rect width="100%" height="100%" fill="${backgroundColor}"/>\n\n`;
+        //
+        // For the plexiglas_black product the background MUST be transparent
+        // so the black plexi material shows through wherever no ink lands.
+        // Emitting a full-page <rect fill="..."> would either flood the page
+        // with that colour (defeating the point of black plexi) or, if the
+        // colour happens to be white, fight with the White spot-colour plate
+        // the server stamps on. Either way it's wrong, so we drop the rect
+        // entirely on this style.
+        let svgBody = '';
+        if (!isPlexi) {
+            svgBody += `  <!-- Background -->\n  <rect width="100%" height="100%" fill="${backgroundColor}"/>\n\n`;
+        }
 
         // Render layers in the determined order
         for (const layerInfo of renderOrder) {
@@ -126,11 +161,31 @@ class SVGRenderer {
             if (features && features.length > 0) {
                 console.log(`🎨 Rendering ${layerName} layer with ${features.length} features`);
                 svgBody += `  <!-- ${layerName.toUpperCase()} LAYER (from ${layerInfo.sourceLayer}) -->\n`;
-                // Apply a small Gaussian blur to the roads group so SVG line
-                // edges match Mapbox's softer WebGL line rendering. See
-                // _buildHaloFilterDefs for filter rationale.
-                const groupFilterAttr = layerName === 'roads' ? ` filter="url(#line-soften)"` : '';
-                svgBody += `  <g class="${layerName}-layer"${groupFilterAttr}>\n`;
+                // We used to apply filter="url(#line-soften)" on the
+                // roads group to match Mapbox's softer WebGL line
+                // anti-aliasing in browser SVG previews. That breaks
+                // Adobe Illustrator's SVG opener: Illustrator silently
+                // hides any element with a filter reference, so the
+                // entire Roads layer disappears in the Layers panel.
+                // Since the export is intended for production design/
+                // cutter tools, we drop the cosmetic filter here so the
+                // roads come through as crisp strokes in every tool.
+                const groupFilterAttr = '';
+                // Promote every top-level group to a named SVG layer.
+                // We emit both the Inkscape and the Adobe Illustrator
+                // layer hints so the group is recognised as a real
+                // layer by both Illustrator's native SVG path
+                // (xmlns:i / i:layer="yes") and its Inkscape-compat
+                // path (inkscape:groupmode / inkscape:label). Without
+                // these, Illustrator collapses unlabeled top-level
+                // <g>s as SUBLAYERS of the only labeled one
+                // (Thrucut), which makes it look like "everything is
+                // in the Thrucut layer" in the Layers panel.
+                const layerLabel = SVGRenderer._layerLabel(layerName);
+                svgBody += `  <g id="${layerLabel}" class="${layerName}-layer"`
+                    + ` inkscape:groupmode="layer" inkscape:label="${layerLabel}"`
+                    + ` xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" i:layer="yes"`
+                    + `${groupFilterAttr}>\n`;
                 
                 let renderedCount = 0;
                 let skippedCount = 0;
@@ -216,7 +271,15 @@ class SVGRenderer {
 
             if (overlayData.innerContent) {
                 svgBody += `  <!-- OVERLAY LAYER -->\n`;
-                svgBody += `  <g id="Overlay" class="overlay-layer" transform="${overlayTransform}">\n`;
+                // Mark the overlay group as a real SVG layer (both
+                // Inkscape and Adobe Illustrator layer hints) so it
+                // appears as a named sibling of Thrucut in the
+                // Layers panel rather than being demoted to a
+                // sublayer of Thrucut.
+                svgBody += `  <g id="Overlay" class="overlay-layer"`
+                    + ` inkscape:groupmode="layer" inkscape:label="Overlay"`
+                    + ` xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" i:layer="yes"`
+                    + ` transform="${overlayTransform}">\n`;
                 svgBody += overlayData.innerContent;
                 svgBody += `\n  </g>\n`;
             }
@@ -242,6 +305,29 @@ class SVGRenderer {
                     svgBody += `\n  </g>\n`;
                 }
             }
+        }
+
+        // Force-register the DIN Pro variants the overlay needs.
+        //
+        // The overlay text gets outlined to <path>s before this SVG
+        // ships to the printer, so the @font-face block isn't on the
+        // critical path for print fidelity any more. We still register
+        // both weights here so a user previewing the .svg directly in
+        // a browser (or opening it in Inkscape / Illustrator before
+        // the outline pass runs) sees the same DIN Pro Regular / Bold
+        // weights the canvas uses, instead of falling back to a
+        // synthesised faux-bold from the system stack.
+        //
+        // FeatureConverter.usedFonts only tracks fonts referenced by
+        // Mapbox basemap LABEL features (gpx-app's overlay text never
+        // routes through FeatureConverter), so we add the overlay's
+        // requirements here. The dedupe key in
+        // generateSVGFontDefinitions is family|weight|style, so a
+        // basemap that already uses one of these variants doesn't
+        // double up.
+        if (overlayData && overlayData.innerContent) {
+            FeatureConverter.usedFonts.add({ mapboxFontNames: ['DIN Pro Bold'] });
+            FeatureConverter.usedFonts.add({ mapboxFontNames: ['DIN Pro Regular'] });
         }
 
         // Now that featureToSVG has populated usedFonts and any halo-blur
@@ -270,7 +356,88 @@ class SVGRenderer {
 ${fontDefinitions}${filterDefs}
 
 ${svgBody}</svg>`;
-        return svgContent;
+
+        // Always outline live text into glyph <path>s before returning
+        // the SVG. Reasons (apply equally to forex and plexiglas_black):
+        //
+        //   1. The server-side ``svglib`` -> ReportLab pipeline can't
+        //      register CFF-flavored OpenType fonts (DIN Pro is shipped
+        //      as ``OTTO``-signed .otf; ``TTFont`` rejects it). Without
+        //      outlining, svglib silently falls back to a system font —
+        //      empirically Verdana on macOS dev boxes — and *both*
+        //      ``font-weight: bold`` and ``font-weight: normal`` end up
+        //      rendered as the same fallback face. The user-visible
+        //      symptom is the overlay's UTRECHT / MARATHON / "42,2 km"
+        //      / "4:39:18" / "6:34" rendering visibly less bold than the
+        //      live canvas (which uses real DIN Pro Bold via @font-face).
+        //
+        //   2. The cutter / RIP downstream of this PDF cannot rely on
+        //      DIN Pro being installed on the production hardware;
+        //      outlining gives it geometry only, which is exactly what
+        //      spot-colour separation expects.
+        //
+        // Done here (post-assembly) rather than weaving the outliner
+        // into each FeatureConverter branch so a single pass covers
+        // both the Mapbox-emitted basemap labels and the user-overlay
+        // text in one place. See text-outliner.js for the per-glyph
+        // maths.
+        try {
+            return await SVGRenderer._outlineTextInSvg(svgContent);
+        } catch (err) {
+            console.error(`❌ Text outline pass failed for style=${style}:`, err);
+            throw err;
+        }
+    }
+
+    /**
+     * Take a serialised SVG string, parse it, run TextOutliner over
+     * every <text> node, and serialise it back. Lives here (not on
+     * TextOutliner) because it owns the DOMParser/XMLSerializer
+     * round-trip — TextOutliner stays a pure DOM mutator so it can be
+     * unit-tested with jsdom in [tests-js/text-outliner.test.js].
+     */
+    static async _outlineTextInSvg(svgContent) {
+        if (typeof TextOutliner === 'undefined') {
+            throw new Error('TextOutliner is not loaded; cannot outline overlay text');
+        }
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svgContent, 'image/svg+xml');
+        // image/svg+xml parser returns an <svg> root even on parse error,
+        // but the parsererror node lands as the root or as a child.
+        const errEl = doc.querySelector('parsererror');
+        if (errEl) {
+            throw new Error(`Outline pass: malformed SVG (${errEl.textContent || 'unknown'})`);
+        }
+        const root = doc.documentElement;
+        const replaced = await TextOutliner.outlineSvgTextNodes(root);
+        console.log(`🔤 Text outliner replaced ${replaced} <text> node(s) with glyph paths`);
+        return new XMLSerializer().serializeToString(doc);
+    }
+
+    /**
+     * Map our internal layer category key (e.g. 'roads', 'landuse') to a
+     * human-friendly label that Illustrator / Inkscape will display in
+     * their Layers panel. Keep these capitalised and singular so they
+     * read naturally next to the existing "Overlay" and "Thrucut"
+     * labels.
+     */
+    static _layerLabel(layerName) {
+        const overrides = {
+            background: 'Background',
+            landuse: 'Landuse',
+            water: 'Water',
+            islands: 'Islands',
+            boundaries: 'Boundaries',
+            railways: 'Railways',
+            roads: 'Roads',
+            buildings: 'Buildings',
+            labels: 'Labels',
+            route: 'Route',
+            markers: 'Markers',
+        };
+        if (overrides[layerName]) return overrides[layerName];
+        if (!layerName) return 'Layer';
+        return layerName.charAt(0).toUpperCase() + layerName.slice(1);
     }
 
     /** Minimal XML attribute escaping for safely re-emitting values. */
@@ -289,12 +456,12 @@ ${svgBody}</svg>`;
      *   SDF text rendering produces a soft halo edge; without these the SVG
      *   stroke is razor-sharp and makes labels look harsher.
      *
-     * - line-soften : a very small Gaussian blur applied to the roads layer
-     *   group. Mapbox's WebGL line rendering has sub-pixel anti-aliasing
-     *   that produces a slightly soft line edge; SVG strokes (even with
-     *   shape-rendering="optimizeQuality") are pixel-crisp, which makes the
-     *   roads look harder/sharper than the canvas. A 0.4px blur is below
-     *   the threshold of "visibly blurry" but smooths the edge to match.
+     * The previous ``line-soften`` filter was removed: Adobe Illustrator's
+     * SVG opener hides every element that carries a filter reference, and
+     * applying the filter at the layer level made the entire Roads layer
+     * disappear when the export was opened in Illustrator. The blur was
+     * a browser-only cosmetic match for Mapbox's WebGL anti-aliasing and
+     * had no value in print / cutter workflows.
      */
     static _buildHaloFilterDefs() {
         const blurValues = [0.3, 0.6, 1.0, 1.5, 2.0];
@@ -302,14 +469,9 @@ ${svgBody}</svg>`;
       <feGaussianBlur stdDeviation="${v}"/>
     </filter>`).join('\n');
 
-        const lineSoften = `    <filter id="line-soften" x="-2%" y="-2%" width="104%" height="104%">
-      <feGaussianBlur stdDeviation="0.25"/>
-    </filter>`;
-
         return `
   <defs>
 ${haloFilters}
-${lineSoften}
   </defs>`;
     }
 }

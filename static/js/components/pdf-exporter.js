@@ -1,206 +1,157 @@
 /**
- * PDF Exporter
- * Combines the current map canvas with the active overlay (including Thrucut lines)
- * and exports the result as a PDF.
+ * PDF Exporter (server-side, SVG-driven).
+ *
+ * Reuses the existing SVG export pipeline (``SVGExporter.buildSVGString``)
+ * to produce a vector snapshot of the live map + medal overlay, then POSTs
+ * that SVG to ``/export-pdf``. The server splits the Thrucut groups out of
+ * the artwork and re-emits them as a Separation spot color named "Thrucut"
+ * sitting in a dedicated Optional Content Group on the page, while the
+ * basemap / routes / markers / medal artwork render as pure vector via
+ * svglib.
+ *
+ * The benefits over the previous "send map state, render server-side"
+ * design:
+ *   * everything the user sees on screen is what gets printed (the SVG
+ *     export is the source of truth)
+ *   * no Mapbox Static Images API call, no offscreen WebGL render, no
+ *     PNG round-trip
+ *   * the marker/route/label fixes that improve the SVG export
+ *     automatically improve the PDF too
  */
 class PDFExporter {
+    /** Per-style PDF page geometry, in millimetres.
+     *
+     *   forex            -> 238.5 x 328.6 mm. Thrucut is 225 x 310 mm; the
+     *                       6% proportional bleed around it gives the user-
+     *                       visible canvas (same 225/310 aspect ratio)
+     *                       roughly 7 mm horizontal and 9 mm vertical bleed.
+     *
+     *   plexiglas_black  -> 245 x 330 mm. The Plexiglas Black product spec
+     *                       requires a fixed 10 mm bleed on every side, so
+     *                       the page is exactly Thrucut + 2x10 mm. The
+     *                       server then writes a TrimBox at 225 x 310 mm
+     *                       so press operators can verify the cut/bleed.
+     *
+     * Anything not in this map falls back to forex. The server re-validates
+     * the page_mm we send, so a stale client can't silently push a wrong
+     * size into production.
+     */
+    static PAGE_MM_BY_STYLE = Object.freeze({
+        forex: Object.freeze({ width: 238.5, height: 328.6 }),
+        plexiglas_black: Object.freeze({ width: 245.0, height: 330.0 }),
+    });
+
+    /** Backwards-compatible default for callers that don't (yet) pass a style. */
+    static PAGE_MM = PDFExporter.PAGE_MM_BY_STYLE.forex;
+
     constructor(mapManager, mapSynchronizer) {
         this.mapManager = mapManager;
         this.mapSynchronizer = mapSynchronizer;
-        this.jspdfLoadingPromise = null;
+        // Reuse the same SVG exporter the user already drives via "Save SVG".
+        // Constructed lazily so a missing global doesn't break the module
+        // load order in tests.
+        this._svgExporter = null;
+    }
+
+    _getSVGExporter() {
+        if (!this._svgExporter) {
+            if (typeof SVGExporter === 'undefined') {
+                throw new Error('SVGExporter is not loaded; cannot build PDF');
+            }
+            this._svgExporter = new SVGExporter(this.mapManager);
+        }
+        return this._svgExporter;
+    }
+
+    /**
+     * Resolve which export style the current map view is using.
+     *
+     * The Mapbox style dropdown in [templates/components/gpx_controls.html]
+     * exposes three values: ``forex``, ``plexiglas`` (white plexi), and
+     * ``plexiglas_black``. Only ``plexiglas_black`` triggers the
+     * spot-colour-White / outlined-text / transparent-background pipeline;
+     * the other two ride on the existing forex pipeline (which has been
+     * production-validated for the white plexi product as well).
+     *
+     * Anything we don't recognise (no map manager loaded yet, future style
+     * keys, etc.) falls back to forex so a fresh deploy never accidentally
+     * ships a half-configured plexi-black PDF.
+     */
+    _resolveStyle() {
+        const raw = this.mapManager && this.mapManager.currentStyle;
+        if (raw === 'plexiglas_black') return 'plexiglas_black';
+        return 'forex';
     }
 
     async saveAsPDF() {
-        const map = this.mapManager.getMap();
-        await ExportUtilities.waitForMapReady(map);
-
-        const mapCanvas = map.getCanvas();
-        if (!mapCanvas) {
-            throw new Error('Map canvas not available for PDF export');
+        showToast('🗺️ Building vector snapshot for PDF…', 'success');
+        const style = this._resolveStyle();
+        const pageMm = PDFExporter.PAGE_MM_BY_STYLE[style] || PDFExporter.PAGE_MM_BY_STYLE.forex;
+        const svgString = await this._getSVGExporter().buildSVGString(style);
+        if (!svgString) {
+            throw new Error('SVG export pipeline returned no content');
         }
 
-        const width = mapCanvas.width;
-        const height = mapCanvas.height;
-
-        // Base map image (all layers visible on canvas)
-        const baseDataUrl = mapCanvas.toDataURL('image/png');
-
-        // Overlay vector stays separate so Thrucut remains its own PDF layer
-        let overlaySVG = null;
-        let overlayViewBox = null;
-        if (window.gpxApp && typeof window.gpxApp.getOverlayExportData === 'function') {
-            const overlayData = await window.gpxApp.getOverlayExportData();
-            if (overlayData && overlayData.fullSVG) {
-                overlaySVG = overlayData.fullSVG;
-                overlayViewBox = overlayData.viewBox || null;
-            }
-        }
-
-        await this.ensureJSPDF();
-        if (overlaySVG) {
-            await this.ensureSVG2PDF();
-        }
-
-        const pdfWidth = this.pxToPoints(width);
-        const pdfHeight = this.pxToPoints(height);
-        const orientation = pdfWidth > pdfHeight ? 'l' : 'p';
-
-        const pdf = new window.jspdf.jsPDF({
-            orientation,
-            unit: 'pt',
-            format: [pdfWidth, pdfHeight]
+        const response = await this._postExportRequest({
+            svg: svgString,
+            style,
+            page_mm: pageMm,
         });
 
-        // Add base map first
-        pdf.addImage(baseDataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-
-        // Add overlay as vector (SVG) on top so Thrucut stays separate
-        if (overlaySVG && window.svg2pdf) {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(overlaySVG, 'image/svg+xml');
-            const svgEl = doc.documentElement;
-
-            // Ensure viewBox is present
-            const vb = overlayViewBox || this.parseViewBox(svgEl.getAttribute('viewBox')) || {
-                minX: 0,
-                minY: 0,
-                width: width,
-                height: height
-            };
-            svgEl.setAttribute('viewBox', `${vb.minX} ${vb.minY} ${vb.width} ${vb.height}`);
-
-            // Size to page (points)
-            svgEl.setAttribute('width', `${pdfWidth}pt`);
-            svgEl.setAttribute('height', `${pdfHeight}pt`);
-
-            // Render SVG into PDF as vector. svg2pdf.js v2 returns a Promise and
-            // attaches itself as a jsPDF plugin (pdf.svg), with a fallback to the
-            // standalone named export if pdf.svg is not available.
-            const svgOptions = {
-                x: 0,
-                y: 0,
-                width: pdfWidth,
-                height: pdfHeight,
-                preserveAspectRatio: 'xMidYMid meet'
-            };
-            if (typeof pdf.svg === 'function') {
-                await pdf.svg(svgEl, svgOptions);
-            } else if (typeof window.svg2pdf.svg2pdf === 'function') {
-                await window.svg2pdf.svg2pdf(svgEl, pdf, svgOptions);
-            } else if (typeof window.svg2pdf === 'function') {
-                await window.svg2pdf(svgEl, pdf, svgOptions);
-            } else {
-                throw new Error('svg2pdf API is not available on the loaded bundle');
-            }
+        if (!response.ok) {
+            const message = await this._extractErrorMessage(response);
+            throw new Error(message);
         }
 
-        const filename = `gpx-route-${new Date().toISOString().split('T')[0]}.pdf`;
-        pdf.save(filename);
+        const blob = await response.blob();
+        const filename = this._extractFilename(response)
+            || `gpx-route-${new Date().toISOString().split('T')[0]}.pdf`;
+        ExportUtilities.downloadBlob(blob, filename);
 
-        showToast('✅ PDF export ready with overlay and Thrucut lines', 'success', 4000);
+        const widthMm = response.headers.get('X-PDF-Page-Width-mm');
+        const heightMm = response.headers.get('X-PDF-Page-Height-mm');
+        const sizeNote = (widthMm && heightMm)
+            ? ` (${widthMm} x ${heightMm} mm)`
+            : '';
+        const styleNote = style === 'plexiglas_black'
+            ? 'Thrucut + White spot colors'
+            : 'Thrucut spot color';
+        showToast(
+            `✅ PDF export ready with ${styleNote}${sizeNote}`,
+            'success', 4000
+        );
     }
 
-    pxToPoints(px) {
-        const pxPerInch = 96; // Browser CSS pixels per inch
-        return (px / pxPerInch) * 72;
-    }
-
-    async ensureJSPDF() {
-        if (window.jspdf && window.jspdf.jsPDF) {
-            return;
-        }
-
-        if (!this.jspdfLoadingPromise) {
-            this.jspdfLoadingPromise = new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error('Failed to load jsPDF for PDF export'));
-                document.head.appendChild(script);
-            });
-        }
-
-        await this.jspdfLoadingPromise;
-
-        if (!window.jspdf || !window.jspdf.jsPDF) {
-            throw new Error('jsPDF failed to initialize');
-        }
-    }
-
-    async svgToImage(svgContent, viewBox) {
-        const sizedSvg = this.addSizeAttributes(svgContent, viewBox);
-        const blob = new Blob([sizedSvg], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                URL.revokeObjectURL(url);
-                resolve(img);
-            };
-            img.onerror = () => {
-                URL.revokeObjectURL(url);
-                reject(new Error('Failed to render overlay SVG'));
-            };
-            img.src = url;
+    async _postExportRequest(payload) {
+        const csrfToken = (window.gpxApp && window.gpxApp.csrfToken) || '';
+        return fetch('/export-pdf', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+            },
+            body: JSON.stringify(payload),
         });
     }
 
-    addSizeAttributes(svgContent, viewBox) {
-        if (!viewBox) {
-            return svgContent;
+    async _extractErrorMessage(response) {
+        try {
+            const data = await response.json();
+            if (data && data.error) return data.error;
+        } catch (_) {
+            // fall through
         }
-
-        const hasWidth = /<svg[^>]*\bwidth=/.test(svgContent);
-        const hasHeight = /<svg[^>]*\bheight=/.test(svgContent);
-
-        if (hasWidth && hasHeight) {
-            return svgContent;
-        }
-
-        const widthAttr = `width="${viewBox.width || 0}"`;
-        const heightAttr = `height="${viewBox.height || 0}"`;
-        return svgContent.replace('<svg ', `<svg ${widthAttr} ${heightAttr} `);
+        return `PDF export failed with HTTP ${response.status}`;
     }
 
-    parseViewBox(viewBoxAttr) {
-        if (!viewBoxAttr) return null;
-        const parts = viewBoxAttr.trim().split(/\s+/).map(parseFloat);
-        if (parts.length === 4 && parts.every(val => Number.isFinite(val))) {
-            return {
-                minX: parts[0],
-                minY: parts[1],
-                width: parts[2],
-                height: parts[3]
-            };
-        }
-        return null;
-    }
-
-    async ensureSVG2PDF() {
-        if (window.svg2pdf) {
-            return;
-        }
-
-        if (!this.svg2pdfLoadingPromise) {
-            this.svg2pdfLoadingPromise = new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/svg2pdf.js@2.7.0/dist/svg2pdf.umd.min.js';
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error('Failed to load svg2pdf for vector overlay'));
-                document.head.appendChild(script);
-            });
-        }
-
-        await this.svg2pdfLoadingPromise;
-
-        if (!window.svg2pdf) {
-            throw new Error('svg2pdf failed to initialize');
-        }
+    _extractFilename(response) {
+        const cd = response.headers.get('Content-Disposition') || '';
+        const match = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+        return match ? decodeURIComponent(match[1]) : null;
     }
 }
 
-// Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = PDFExporter;
 }

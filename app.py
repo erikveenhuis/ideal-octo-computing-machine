@@ -36,6 +36,16 @@ from services.sporthive_service import SporthiveService
 from services.image_transform_service import ImageTransformService
 from services.gpx_processing_service import GPXProcessingService
 from services.deployment_service import DeploymentService
+from services.pdf_export_service import (
+    ALLOWED_STYLES,
+    ExportRequest,
+    PAGE_TARGET_MM,
+    PDFExportError,
+    PDFExportService,
+    PLEXI_PAGE_MM,
+    STYLE_FOREX,
+    STYLE_PLEXIGLAS_BLACK,
+)
 
 def create_app(config_name=None):
     """Application factory pattern."""
@@ -109,6 +119,13 @@ deployment_service = DeploymentService(
     wsgi_file_path=app.config.get('WSGI_FILE_PATH'),
     venv_pip_path=app.config.get('VENV_PIP_PATH')
 )
+
+# Initialize PDF export pipeline. The service receives the browser's
+# vector SVG export and re-emits it as a PDF with the Thrucut group on a
+# real Separation colorant inside an Optional Content Group. No external
+# services are required at this point — everything the user sees on screen
+# is already in the SVG payload.
+pdf_export_service = PDFExportService()
 
 # Configure API tokens from config
 if not app.config['REPLICATE_API_TOKEN']:
@@ -221,6 +238,117 @@ def gpx_upload():
     return render_template('gpx.html', config={
         'MAPBOX_ACCESS_TOKEN': mapbox_token
     })
+
+# Cap the SVG payload at ~32 MB even though Flask's MAX_CONTENT_LENGTH is
+# 16 MB by default — the gpx route's exporter usually produces 4–6 MB but
+# very dense maps can push past 10 MB. Anything larger is almost certainly
+# a malformed body or a runaway browser tab; we reject early so the request
+# pipeline doesn't waste CPU parsing it.
+_MAX_EXPORT_SVG_LENGTH = 32 * 1024 * 1024
+
+
+@app.route('/export-pdf', methods=['POST'])
+@limiter.limit(app.config['UPLOAD_RATE_LIMIT'])
+@log_request_metrics
+def export_pdf():
+    """Build a print-ready PDF for the current GPX export state.
+
+    Contract: ``POST /export-pdf`` with JSON ``{ svg, page_mm: { width, height } }``.
+
+    ``svg`` is the full SVG export already produced client-side (the same
+    document the user can download via "Save SVG"). The server splits the
+    Thrucut group out, re-emits it as a Separation spot color in an OCG
+    named "Thrucut", and ships the merged PDF back. Errors return JSON 400
+    so the front-end can show a toast.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ValidationError('Request body must be JSON', 'body')
+
+    svg_text = payload.get('svg')
+    if not isinstance(svg_text, str) or not svg_text.strip():
+        raise ValidationError(
+            'svg is required and must be a non-empty string', 'svg'
+        )
+    if len(svg_text) > _MAX_EXPORT_SVG_LENGTH:
+        raise ValidationError(
+            f'svg is too large ({len(svg_text)} bytes; '
+            f'max {_MAX_EXPORT_SVG_LENGTH})', 'svg'
+        )
+    if '<svg' not in svg_text[:2048]:
+        raise ValidationError(
+            'svg payload does not look like an SVG document', 'svg'
+        )
+
+    # Style selects which production pipeline to use. We allow-list the
+    # values up front so a typo on the client (or a bad cURL command)
+    # surfaces a clear JSON error rather than failing deep inside the
+    # PDF service. Default ``forex`` keeps the contract back-compat for
+    # any client (or test) that still posts the {svg, page_mm} payload.
+    raw_style = payload.get('style', STYLE_FOREX)
+    if not isinstance(raw_style, str):
+        raise ValidationError('style must be a string', 'style')
+    style = raw_style.strip().lower()
+    if style not in ALLOWED_STYLES:
+        raise ValidationError(
+            f'unsupported style {raw_style!r}; '
+            f'allowed: {sorted(ALLOWED_STYLES)}',
+            'style',
+        )
+
+    # Default page_mm depends on the style: plexi-black uses the spec
+    # 245 x 330 mm (Thrucut + 10 mm bleed), forex uses the existing
+    # 238.5 x 328.6 mm (Thrucut + 6% bleed). The client always sends
+    # the right page size; this default just covers omitted-payload
+    # smoke tests and curl users.
+    style_default_page_mm = (
+        PLEXI_PAGE_MM if style == STYLE_PLEXIGLAS_BLACK else PAGE_TARGET_MM
+    )
+
+    page_mm_payload = payload.get('page_mm') or {}
+    if not isinstance(page_mm_payload, dict):
+        raise ValidationError('page_mm must be an object', 'page_mm')
+    try:
+        page_w = float(page_mm_payload.get('width', style_default_page_mm[0]))
+        page_h = float(page_mm_payload.get('height', style_default_page_mm[1]))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f'Invalid page_mm: {exc}', 'page_mm') from exc
+    if not (50.0 <= page_w <= 1000.0 and 50.0 <= page_h <= 1000.0):
+        raise ValidationError(
+            f'page_mm out of range: {page_w}x{page_h} (must be in [50, 1000] mm)',
+            'page_mm',
+        )
+
+    req = ExportRequest(svg_text=svg_text, page_mm=(page_w, page_h), style=style)
+
+    try:
+        result = pdf_export_service.build_pdf(req)
+    except PDFExportError as exc:
+        app.logger.warning(f"PDF export rejected: {exc}")
+        return jsonify({'error': str(exc)}), 400
+
+    from flask import Response
+    filename = f"gpx-route-{datetime.now(timezone.utc).date().isoformat()}.pdf"
+    headers = {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'Content-Length': str(len(result.pdf_bytes)),
+        'X-PDF-Style': result.style,
+        'X-PDF-Page-Width-mm': f"{result.page_size_mm[0]:.2f}",
+        'X-PDF-Page-Height-mm': f"{result.page_size_mm[1]:.2f}",
+        'X-PDF-Thrucut-Width-mm': f"{result.thrucut_size_mm[0]:.2f}",
+        'X-PDF-Thrucut-Height-mm': f"{result.thrucut_size_mm[1]:.2f}",
+    }
+    if result.trim_box_mm is not None:
+        # trim_box_mm = (left, bottom, right, top). Surfacing the
+        # left/bottom inset (= bleed) as a single header is the cheapest
+        # way for the front-end / curl to verify the geometry.
+        l, b, r, t = result.trim_box_mm
+        headers['X-PDF-Trim-Width-mm'] = f"{r - l:.2f}"
+        headers['X-PDF-Trim-Height-mm'] = f"{t - b:.2f}"
+        headers['X-PDF-Trim-Bleed-mm'] = f"{l:.2f}"
+    return Response(result.pdf_bytes, status=200, headers=headers)
+
 
 @app.route('/upload-gpx', methods=['POST'])
 @limiter.limit(app.config['UPLOAD_RATE_LIMIT'])

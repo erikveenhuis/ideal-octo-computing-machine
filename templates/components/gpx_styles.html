@@ -12,13 +12,17 @@
         background-color: #374151;
     }
     .map-wrapper {
-        /* Always maintain 8.5:11 aspect ratio */
-        aspect-ratio: 8.5 / 11;
-        /* Perfect size for clean 3x scaling to print (850x3=2550, 1100x3=3300) */
-        /* Container is 854px to account for 2px border on each side (854-4=850px internal) */
+        /*
+         * Match the PDF page aspect (Thrucut 225x310 mm + ~6% proportional
+         * bleed = 238.5x328.6 mm). Both dimensions scale by the same factor,
+         * so the on-screen canvas is a 1:1 preview of the export — including
+         * the small bleed visible around the cut line.
+         */
+        aspect-ratio: 225 / 310;
+        /* Container is 854px to account for 2px border on each side (854-4=850px internal). */
         width: 854px;
-        /* Force exact height to get 1100px internal (1104-4=1100px) */
-        height: 1104px;
+        /* Height follows aspect-ratio (~1177px) so the canvas reflects the
+           Thrucut shape directly rather than the previous 8.5x11 letter aspect. */
         border: 2px solid #111;
         border-radius: 4px;
         overflow: hidden;

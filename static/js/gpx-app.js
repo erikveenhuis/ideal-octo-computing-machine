@@ -870,22 +870,48 @@ class GPXApp {
         // Center reference above date (based on date rect center ~ x=231.4)
         const centerX = 231.4;
 
+        // Overlay typography is DIN Pro across the board (already shipped at
+        // static/fonts/DIN Pro/ and embedded as @font-face in every export):
+        //   - Titles + stats: DIN Pro Bold (font-weight: 700) for visual
+        //     hierarchy. The umbrella ``font-family: 'DIN Pro'`` resolves
+        //     to the Bold variant via the @font-face block in
+        //     [svg-renderer.js]; that block force-registers DIN Pro Bold
+        //     and Regular whenever the overlay is present, so a basemap
+        //     that happens to use only DIN Pro Medium / no labels at all
+        //     still gets the right OTF embedded for the overlay's stats
+        //     and titles. Without that force-registration the export
+        //     silently fell back to a synthesised faux-bold which made
+        //     "UTRECHT" / "MARATHON" / "42,2 km" / "4:39:18" / "6:34"
+        //     render visibly LIGHTER than bold in PDFs viewed in
+        //     Acrobat / Illustrator.
+        //   - Date: DIN Pro Regular for typographic balance against the
+        //     bold numerals above and below.
+        //
+        // Switching to DIN Pro for the overlay also unblocks the
+        // plexiglas_black export pipeline: every <text> in the export is
+        // now an opentype.js-renderable DIN Pro glyph string, so
+        // TextOutliner can convert them to filled <path>s and the print
+        // PDF no longer needs Arial installed on the cutter / RIP machine.
+        const TITLE_STYLE = (size) => `font-family:'DIN Pro';font-size:${size}px;font-weight:bold;`;
+        const DATE_STYLE = "font-family:'DIN Pro';font-size:20px;font-weight:normal;";
+        const STAT_STYLE = "font-family:'DIN Pro';font-size:24px;font-weight:bold;";
+
         // Title block centered
         svgEl.appendChild(this.createTextElement(doc, centerX, 120.7204, [
-            { text: values.title1 || '', y: 0, style: `font-family:'Arial Black';font-size:${title1Size}px;font-weight:bold;` },
-            { text: values.title2 || '', y: title2Offset, style: `font-family:'Arial Black';font-size:${title2Size}px;font-weight:bold;` }
+            { text: values.title1 || '', y: 0, style: TITLE_STYLE(title1Size) },
+            { text: values.title2 || '', y: title2Offset, style: TITLE_STYLE(title2Size) }
         ], 'middle'));
 
         // Date block centered beneath titles
         svgEl.appendChild(this.createTextElement(doc, centerX, 183.1047, [
-            { text: values.date || '', y: 0, style: "font-family:'Arial';font-size:20px;font-weight:normal;" }
+            { text: values.date || '', y: 0, style: DATE_STYLE }
         ], 'middle'));
 
         // Stats block (distance, time, pace)
         svgEl.appendChild(this.createTextElement(doc, 227.8591, 707.8073, [
-            { text: values.distance || '', y: 0, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" },
-            { text: values.time || '', y: 30, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" },
-            { text: values.pace || '', y: 58.8, style: "font-family:'Arial Black';font-size:24px;font-weight:bold;" }
+            { text: values.distance || '', y: 0, style: STAT_STYLE },
+            { text: values.time || '', y: 30, style: STAT_STYLE },
+            { text: values.pace || '', y: 58.8, style: STAT_STYLE }
         ]));
 
         const serializer = new XMLSerializer();

@@ -39,6 +39,15 @@ def flask_app():
         # but we route storage to a per-test in-memory backend.
         RATELIMIT_ENABLED=False,
     )
+    # Flask-Limiter caches the ``enabled`` flag on the limiter instance at
+    # ``init_app`` time, so toggling RATELIMIT_ENABLED via app.config alone
+    # is not enough — the limiter has already booted with rate limiting
+    # ON because ``create_app()`` ran at module import time before
+    # conftest could intervene. Setting ``limiter.enabled = False``
+    # directly is the documented escape hatch and stops the per-route
+    # 10 / minute cap from cycling tests through HTTP 429.
+    if hasattr(app_module, "limiter") and app_module.limiter is not None:
+        app_module.limiter.enabled = False
     return flask_app
 
 

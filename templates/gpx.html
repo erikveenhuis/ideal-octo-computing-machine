@@ -50,6 +50,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load local GPX scripts
     const loadGPXScripts = async () => {
         const gpxScripts = [
+            // Vendored opentype.js (~170 KB, MIT) — used by text-outliner.js
+            // to convert SVG <text> nodes to glyph <path>s for the
+            // plexiglas_black PDF export pipeline. Vendored rather than
+            // CDN-loaded so the print pipeline never fails because a
+            // third-party host is unreachable.
+            '{{ url_for("static", filename="js/vendor/opentype.min.js") }}',
             '{{ url_for("static", filename="js/gpx-config.js") }}',
             '{{ url_for("static", filename="js/gpx-utils.js") }}',
             '{{ url_for("static", filename="js/gpx-map-manager.js") }}',
@@ -64,6 +70,10 @@ document.addEventListener('DOMContentLoaded', function() {
             '{{ url_for("static", filename="js/components/map-projection.js") }}',
             '{{ url_for("static", filename="js/components/feature-converter.js") }}',
             '{{ url_for("static", filename="js/components/feature-organizer.js") }}',
+            // text-outliner depends on opentype (loaded above) and is
+            // consumed by svg-renderer when the user picks the
+            // plexiglas_black map style.
+            '{{ url_for("static", filename="js/components/text-outliner.js") }}',
             '{{ url_for("static", filename="js/components/svg-renderer.js") }}',
             '{{ url_for("static", filename="js/components/overlay-cut-extractor.js") }}',
             '{{ url_for("static", filename="js/components/svg-exporter.js") }}',

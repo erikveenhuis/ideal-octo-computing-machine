@@ -424,23 +424,21 @@ class GPXMapManager {
 
     updateActiveRouteColor(color) {
         if (!this.activeRouteId) return;
-        
+
         const route = this.routes.get(this.activeRouteId);
-        if (route) {
-            route.color = color;
-            route.layer.paint['line-color'] = color;
-            
-            // Update the map layer
-            this.map.setPaintProperty(this.activeRouteId, 'line-color', color);
-            
-            // Update markers color if this route has markers
-            if (this.markersSource) {
-                this.markersSource.data.features.forEach(feature => {
-                    feature.properties['marker-color'] = color;
-                });
-                this.map.getSource('markers').setData(this.markersSource.data);
-            }
-        }
+        if (!route) return;
+
+        // Only the active route's line colour is changed here. Marker
+        // colours are intentionally NOT touched: each route owns its own
+        // start/finish marker colours via updateActiveRouteStartMarkerColor /
+        // updateActiveRouteFinishMarkerColor, and the previous broad sweep
+        // across markersSource.data.features overwrote sibling routes' marker
+        // colours every time the line colour control changed — making
+        // multi-route exports look like every endpoint shared the same
+        // colour as the most recently edited route.
+        route.color = color;
+        route.layer.paint['line-color'] = color;
+        this.map.setPaintProperty(this.activeRouteId, 'line-color', color);
     }
 
     updateActiveRouteWidth(width) {

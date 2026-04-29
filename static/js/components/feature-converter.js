@@ -144,7 +144,37 @@ class FeatureConverter {
                     
                                          // Use canvas color
                      if (canvasColor !== undefined) color = canvasColor;
-                     if (canvasOpacity !== undefined) opacity = canvasOpacity;
+                     // map.getPaintProperty() returns the RAW style value -
+                     // for road layers this is typically a Mapbox
+                     // expression (Array or Object), not a final number.
+                     // If we assign it directly here we override the
+                     // already-evaluated number above with the
+                     // unevaluated expression, which then propagates as
+                     // NaN through `softerOpacity = opacity * 0.95`
+                     // below and lands in the SVG as
+                     // `stroke-opacity="NaN"`. Browsers tolerate that
+                     // (treat it as 1), but Adobe Illustrator's SVG
+                     // opener parses stroke-opacity strictly and renders
+                     // a NaN value as 0 - which is why every road in the
+                     // export was invisible in Illustrator while still
+                     // showing up in the Layers panel. Run the canvas
+                     // value through the same expression evaluator
+                     // we use for the style-paint branch and only adopt
+                     // it when we got a finite number back.
+                     if (canvasOpacity !== undefined) {
+                         let resolvedOpacity = canvasOpacity;
+                         if (Array.isArray(canvasOpacity) || (typeof canvasOpacity === 'object' && canvasOpacity !== null)) {
+                             try {
+                                 resolvedOpacity = ExportUtilities.evaluateExpression(canvasOpacity, { zoom: currentZoom });
+                             } catch (_) {
+                                 resolvedOpacity = undefined;
+                             }
+                         }
+                         const numericOpacity = Number(resolvedOpacity);
+                         if (Number.isFinite(numericOpacity)) {
+                             opacity = numericOpacity;
+                         }
+                     }
                      
                      // Evaluate canvas width expression properly  
                      if (canvasWidth !== undefined) {
@@ -238,14 +268,26 @@ class FeatureConverter {
         // Soften edges for more canvas-like appearance
         const isRoadForRendering = layerId && (layerId.includes('road') || layerId.includes('street') || layerId.includes('highway'));
         let svgElement;
-        
+
+        // Coerce opacity to a finite number in [0, 1] right before
+        // emission. If anything upstream left an expression / object /
+        // NaN in `opacity`, browsers tolerate it but Illustrator
+        // treats invalid stroke-opacity as 0 (fully transparent),
+        // making the layer invisible while it still shows up in the
+        // Layers panel. Defaulting to 1 here is the safe fallback:
+        // the only way to lose visibility silently was via NaN.
+        const numericOpacity = Number(opacity);
+        const safeOpacity = Number.isFinite(numericOpacity)
+            ? Math.min(1, Math.max(0, numericOpacity))
+            : 1;
+
         if (isRoadForRendering) {
             // Use softer rendering for roads to match canvas appearance
-            const softerOpacity = opacity * 0.95; // Slightly reduce opacity for softer look
+            const softerOpacity = safeOpacity * 0.95; // Slightly reduce opacity for softer look
             svgElement = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-opacity="${softerOpacity}" stroke-linecap="round" stroke-linejoin="round" shape-rendering="optimizeQuality"/>`;
         } else {
             // Standard rendering for non-roads
-            svgElement = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
+            svgElement = `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="${width}" stroke-opacity="${safeOpacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
         }
         
         return svgElement;
@@ -490,19 +532,31 @@ class FeatureConverter {
     }
 
     static pointToSVG(coordinates, properties, paint, layout, projection, layerId = null) {
+        // Skip the marker-labels companion of marker-circles. Both Mapbox
+        // layers emit a feature for every endpoint (start/finish), so without
+        // this guard each route exported two stacked <g class="marker">
+        // elements at the same coordinate. The marker-circles branch below
+        // already produces a combined circle + label group, so dropping the
+        // marker-labels feature here gives one marker per endpoint, with the
+        // route's actual `marker-color` instead of an unevaluated expression
+        // string sneaking through the symbol-layer code path.
+        if (layerId === 'marker-labels') {
+            return null;
+        }
+
         const x = projection.lngToX(coordinates[0]);
         const y = projection.latToY(coordinates[1]);
-        
+
         // ENHANCED: Special handling for combined circle+text markers (S and F markers)
         const hasCircle = paint['circle-radius'];
         const hasText = layout['text-field'];
-        const isMarkerFeature = layerId && (layerId.includes('marker') || 
+        const isMarkerFeature = layerId && (layerId.includes('marker') ||
                                           (properties['marker-symbol'] && properties['marker-color']));
         
         // Handle combined circle+text markers (like S and F start/finish markers)
         if (isMarkerFeature && hasCircle && hasText) {
             const radius = paint['circle-radius'] || 10;
-            const circleColor = paint['circle-color'] || properties['marker-color'] || '#ff8c00';
+            const circleColor = FeatureConverter._resolveMarkerCircleColor(paint, properties);
             let circleOpacity = paint['circle-opacity'] || 1;
             
             // Apply same opacity override as canvas for markers
@@ -742,7 +796,9 @@ class FeatureConverter {
         // Handle circle markers (only for actual marker features, not place labels)
         if (paint['circle-radius']) {
             const radius = paint['circle-radius'] || 5;
-            const color = paint['circle-color'] || properties['marker-color'] || '#ff0000';
+            const color = isMarkerFeature
+                ? FeatureConverter._resolveMarkerCircleColor(paint, properties)
+                : (paint['circle-color'] || properties['marker-color'] || '#ff0000');
             let opacity = paint['circle-opacity'] || 1;
             
             // Apply same opacity override as canvas for markers
@@ -789,6 +845,46 @@ class FeatureConverter {
         
         // Don't render default points for place labels - they should only be text
         return null;
+    }
+
+    /**
+     * Resolve a marker's `circle-color` paint to a concrete CSS color string.
+     *
+     * Mapbox `circle-color` for our markers is the expression
+     * `['get','marker-color']` so each endpoint can carry its own colour
+     * via the feature's properties. SVG attributes can't speak Mapbox
+     * expressions: if we stringify the array directly, `stroke="get,marker-color"`
+     * lands in the export and Illustrator falls back to black for every
+     * marker (which is the multi-route regression).
+     *
+     * Resolution order:
+     *   1. evaluate `paint['circle-color']` if it's an expression / object
+     *   2. take `paint['circle-color']` if it's already a string colour
+     *   3. fall back to the per-feature `marker-color` property
+     *   4. fall back to a sensible default so we never emit an empty fill
+     */
+    static _resolveMarkerCircleColor(paint, properties) {
+        const raw = paint && paint['circle-color'];
+        if (raw && (Array.isArray(raw) || (typeof raw === 'object' && !('r' in raw)))) {
+            try {
+                const evaluated = ExportUtilities.evaluateExpression(raw, properties || {});
+                if (typeof evaluated === 'string' && evaluated && evaluated !== 'undefined') {
+                    return evaluated;
+                }
+            } catch (_) {
+                // Fall through to property-based fallback below.
+            }
+        } else if (typeof raw === 'string' && raw) {
+            return raw;
+        } else if (raw && typeof raw === 'object' && 'r' in raw) {
+            const css = ExportUtilities.rgbaObjectToCSS(raw);
+            if (css) return css;
+        }
+        const propColor = properties && properties['marker-color'];
+        if (typeof propColor === 'string' && propColor) {
+            return propColor;
+        }
+        return '#ff8c00';
     }
 
     /**
