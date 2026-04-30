@@ -1,0 +1,63 @@
+# Pre-commit hooks for local quality gates.
+#
+# Run once after cloning the repo:
+#
+#     pip install -r requirements-dev.txt
+#     pre-commit install
+#
+# This wires the hooks below to ``git commit`` so they run on staged files.
+# CI (.github/workflows/pylint.yml) is the source of truth; pre-commit
+# exists to surface obvious failures before push.
+#
+# To run all hooks against the whole repo on demand:
+#
+#     pre-commit run --all-files
+#
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/pycqa/pylint
+    rev: v3.3.2
+    hooks:
+      - id: pylint
+        # Only lint production code. Tests are deliberately excluded
+        # because pylint complains about pytest fixtures and dynamic
+        # markers; the CI configuration mirrors this.
+        files: ^(app\.py|config\.py|exceptions\.py|error_handlers\.py|utils/.*\.py|services/.*\.py)$
+        args:
+          - --fail-under=9.0
+          - --rcfile=.pylintrc
+        # pylint imports the project at lint time, so it needs the
+        # production deps available. Local installs (via the requirements
+        # files) are fine; CI runs without this hook.
+        additional_dependencies: []
+        # Skip system pylint and use the venv's so the working dir's deps
+        # are visible without polluting the hook env.
+        language: system
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: ["-q", "-c", "/dev/null", "--severity-level", "medium"]
+        files: ^(app\.py|config\.py|exceptions\.py|error_handlers\.py|utils/.*\.py|services/.*\.py)$
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        # ``black --check`` only — Black is not yet enforced as a formatter
+        # across the codebase. Once the repo passes ``black .`` cleanly we
+        # can drop ``--check`` so the hook auto-formats on commit.
+        args: ["--check", "--line-length=100"]
+        files: ^(app\.py|config\.py|exceptions\.py|error_handlers\.py|utils/.*\.py|services/.*\.py)$

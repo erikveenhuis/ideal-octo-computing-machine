@@ -5,12 +5,16 @@ jobs=1
 # Allow loading of arbitrary C extensions
 unsafe-load-any-extension=no
 
+# Trust runtime introspection for these C-extension modules so the
+# c-extension-no-member info messages stop firing for symbols pylint's
+# static analysis can't see (notably lxml.etree.QName).
+extension-pkg-allow-list=lxml,lxml.etree,pymupdf
+
 [MESSAGES CONTROL]
 # Disable specific warnings that are too strict for this codebase
 disable=
-    # Import related
+    # Imports — kept disabled
     import-error,
-    wrong-import-position,
     import-outside-toplevel,
     
     # Code structure
@@ -41,8 +45,20 @@ disable=
 # Maximum number of characters on a single line
 max-line-length=100
 
-# Maximum number of lines in a module
-max-module-lines=1000
+# Maximum number of lines in a module.
+#
+# Bumped from 1000 to 1100 to accommodate ``services/pdf_export_service.py``
+# (~1050 lines). The file is intentionally kept as a single module
+# because the test suite imports many of its private helpers
+# (``_parse_svg``, ``_split_thrucut``, ``_set_spot_color_recursive``,
+# ``_set_white_spot_recursive``, ``_set_page_trimbox_mm``, ``_mm_to_pt``,
+# ``THRUCUT_SPOT_CMYK``, ``WHITE_SPOT_CMYK`` …) and splitting it would
+# require either a wrapper-package re-export layer that obscures the
+# call graph or a coordinated test-suite rewrite. The module is thoroughly
+# documented at the section level (parser, splitter, painters, renderer,
+# merger, trimbox writer) so the lack of file boundaries does not impede
+# navigation. Revisit if the file grows past 1300 lines.
+max-module-lines=1100
 
 [DESIGN]
 # Maximum number of arguments for function / method
@@ -86,8 +102,22 @@ ignore-docstrings=yes
 ignore-imports=yes
 
 [BASIC]
-# Good variable names which should always be accepted
-good-names=i,j,k,ex,Run,_,id,db,app,e,f,pr,x0,y0,x1,y1,x2,y2,_e
+# Good variable names which should always be accepted.
+# - i,j,k,e,f,n  : standard loop / exception / file / node abbreviations
+# - x0..y2       : coordinate pairs in geometry helpers
+# - tx,ty,vw,vh,
+#   pw,ph,rx,ry,
+#   rw,rh,vb,mm  : math-style names used heavily in the SVG / PDF
+#                  geometry pipeline; renaming them to ``page_width``
+#                  hurts readability of the formulas
+# - c            : canvas (matches the reportlab idiom ``c = canvas.Canvas(...)``)
+# - cg           : cut group (used inside the SVG splitter)
+# - l,b,r,t      : left / bottom / right / top, a common box quadruple
+# - id,db,app    : Flask / SQLAlchemy idioms
+good-names=i,j,k,n,e,f,_,_e,ex,Run,pr,id,db,app,
+           x0,y0,x1,y1,x2,y2,
+           tx,ty,vw,vh,pw,ph,rx,ry,rw,rh,vb,mm,
+           w,h,c,cg,l,b,r,t
 
 # Regular expression matching correct function names
 function-rgx=[a-z_][a-z0-9_]{2,50}$

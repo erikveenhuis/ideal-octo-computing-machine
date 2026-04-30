@@ -528,8 +528,7 @@ class GPXApp {
         
         try {
             if (!this.exportManager) {
-                // Lazy load the export manager
-                this.exportManager = new GPXExportManager(this.mapManager);
+                this.exportManager = new ExportManager(this.mapManager);
             }
             
             await this.exportManager.saveAsPNG();
@@ -553,7 +552,7 @@ class GPXApp {
         
         try {
             if (!this.exportManager) {
-                this.exportManager = new GPXExportManager(this.mapManager);
+                this.exportManager = new ExportManager(this.mapManager);
             }
             
             await this.exportManager.saveAsPDF();
@@ -577,8 +576,7 @@ class GPXApp {
         
         try {
             if (!this.exportManager) {
-                // Lazy load the export manager
-                this.exportManager = new GPXExportManager(this.mapManager);
+                this.exportManager = new ExportManager(this.mapManager);
             }
             
             await this.exportManager.saveAsSVG();

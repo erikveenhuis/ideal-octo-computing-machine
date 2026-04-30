@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import os
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from flask import Flask, render_template, request, jsonify
 from flask_limiter import Limiter
@@ -47,11 +48,61 @@ from services.pdf_export_service import (
     STYLE_PLEXIGLAS_BLACK,
 )
 
+def _build_services(flask_app):
+    """Instantiate the application's service singletons from
+    ``flask_app.config``.
+
+    All external-API and processing dependencies are constructed here
+    so the factory has full ownership of object graph creation. The
+    returned ``SimpleNamespace`` is attached to ``flask_app.services``
+    by ``create_app`` and aliased into module-level globals for
+    backwards compatibility with the route handlers below.
+    """
+    return SimpleNamespace(
+        uitslagen=UitslagenService(
+            base_url=flask_app.config['UITSLAGEN_BASE_URL'],
+            timeout=flask_app.config['REQUEST_TIMEOUT'],
+        ),
+        sporthive=SporthiveService(
+            base_url=flask_app.config['SPORTHIVE_API_BASE'],
+            timeout=flask_app.config['SPORTHIVE_TIMEOUT'],
+            default_count=flask_app.config['DEFAULT_RESULT_COUNT'],
+            default_country=flask_app.config['DEFAULT_COUNTRY_CODE'],
+            default_offset=flask_app.config['DEFAULT_RESULT_OFFSET'],
+        ),
+        image_transform=ImageTransformService(
+            replicate_api_token=flask_app.config['REPLICATE_API_TOKEN'],
+            replicate_model=flask_app.config['REPLICATE_MODEL'],
+            transform_prompt=flask_app.config['IMAGE_TRANSFORM_PROMPT'],
+        ),
+        gpx_processing=GPXProcessingService(),
+        deployment=DeploymentService(
+            wsgi_file_path=flask_app.config.get('WSGI_FILE_PATH'),
+            venv_pip_path=flask_app.config.get('VENV_PIP_PATH'),
+        ),
+        # No external APIs — the PDF service operates purely on the
+        # browser's SVG payload, but we still build it from the factory
+        # so it can be swapped out per-app instance in tests if needed.
+        pdf_export=PDFExportService(),
+    )
+
+
 def create_app(config_name=None):
-    """Application factory pattern."""
+    """Application factory.
+
+    Builds a Flask app, wires every Flask extension (CSRFProtect,
+    Compress, Flask-Limiter), configures logging and error handlers,
+    and instantiates every service the route handlers depend on. The
+    services live on ``flask_app.services``; the module-level
+    singletons (``app``, ``limiter``, ``csrf``, ``uitslagen_service``
+    et al.) are populated from the default-config call below for
+    back-compat with code that imports those names directly.
+
+    Tests that need a clean app instance can call ``create_app('testing')``
+    and read ``flask_app.services`` without touching the module globals.
+    """
     flask_app = Flask(__name__)
 
-    # Load configuration
     config_name = config_name or os.environ.get('FLASK_CONFIG', 'default')
     config_class = config[config_name]
     flask_app.config.from_object(config_class)
@@ -61,80 +112,58 @@ def create_app(config_name=None):
     # fallback so misconfigured production deploys fail loud at startup.
     config_class.validate(flask_app)
 
-    # Initialize extensions
     csrf_protect = CSRFProtect(flask_app)
     Compress(flask_app)  # Initialize compression without storing reference
 
     rate_limiter = Limiter(
         key_func=get_remote_address,
         default_limits=[flask_app.config['DEFAULT_RATE_LIMIT']],
-        storage_uri=flask_app.config['RATELIMIT_STORAGE_URL']
+        storage_uri=flask_app.config['RATELIMIT_STORAGE_URL'],
     )
     rate_limiter.init_app(flask_app)
 
-    # Setup logging
     setup_logging(flask_app)
-
-    # Register error handlers
     register_error_handlers(flask_app)
 
-    # Add security headers
     @flask_app.after_request
     def add_security_headers(response):
         for header, value in flask_app.config['SECURITY_HEADERS'].items():
             response.headers[header] = value
         return response
 
+    flask_app.services = _build_services(flask_app)
+
+    if not flask_app.config['REPLICATE_API_TOKEN']:
+        flask_app.logger.warning(
+            "REPLICATE_API_TOKEN not configured. "
+            "Image transformation will be disabled."
+        )
+
+    # Pillow 12 lazy-loads its plugin registry. Prime it before logging
+    # so the log line reflects the actual list of decoders rather than
+    # an empty dict. Idempotent — safe to call from multiple factory
+    # invocations in the test suite.
+    Image.init()
+    flask_app.logger.info(
+        f"Available image decoders: {list(Image.OPEN.keys())}"
+    )
+
     return flask_app, rate_limiter, csrf_protect
 
-# Create app instance
+
+# Default app instance constructed from the FLASK_CONFIG env var. The
+# WSGI server (Gunicorn / PythonAnywhere) imports ``app`` from here.
 app, limiter, csrf = create_app()
 
-# Initialize services
-uitslagen_service = UitslagenService(
-    base_url=app.config['UITSLAGEN_BASE_URL'],
-    timeout=app.config['REQUEST_TIMEOUT']
-)
-
-sporthive_service = SporthiveService(
-    base_url=app.config['SPORTHIVE_API_BASE'],
-    timeout=app.config['SPORTHIVE_TIMEOUT'],
-    default_count=app.config['DEFAULT_RESULT_COUNT'],
-    default_country=app.config['DEFAULT_COUNTRY_CODE'],
-    default_offset=app.config['DEFAULT_RESULT_OFFSET']
-)
-
-# Initialize image transformation service
-image_transform_service = ImageTransformService(
-    replicate_api_token=app.config['REPLICATE_API_TOKEN'],
-    replicate_model=app.config['REPLICATE_MODEL'],
-    transform_prompt=app.config['IMAGE_TRANSFORM_PROMPT']
-)
-
-# Initialize GPX processing service
-gpx_processing_service = GPXProcessingService()
-
-# Initialize deployment service
-deployment_service = DeploymentService(
-    wsgi_file_path=app.config.get('WSGI_FILE_PATH'),
-    venv_pip_path=app.config.get('VENV_PIP_PATH')
-)
-
-# Initialize PDF export pipeline. The service receives the browser's
-# vector SVG export and re-emits it as a PDF with the Thrucut group on a
-# real Separation colorant inside an Optional Content Group. No external
-# services are required at this point — everything the user sees on screen
-# is already in the SVG payload.
-pdf_export_service = PDFExportService()
-
-# Configure API tokens from config
-if not app.config['REPLICATE_API_TOKEN']:
-    app.logger.warning("REPLICATE_API_TOKEN not configured. Image transformation will be disabled.")
-
-# Pillow 12 lazy-loads its plugin registry. Prime it before logging so the
-# log line reflects the actual list of decoders rather than an empty dict.
-Image.init()
-app.logger.info(f"Available image decoders: {list(Image.OPEN.keys())}")
+# Module-level service aliases for back-compat with route handlers.
+# Tests that build a fresh app via ``create_app('testing')`` should
+# reach for ``their_app.services`` directly instead of these globals.
+uitslagen_service = app.services.uitslagen
+sporthive_service = app.services.sporthive
+image_transform_service = app.services.image_transform
+gpx_processing_service = app.services.gpx_processing
+deployment_service = app.services.deployment
+pdf_export_service = app.services.pdf_export
 
 # Wrapper functions for backward compatibility and service integration
 def get_uitslagen_results(name: str) -> list:

@@ -39,9 +39,8 @@ from __future__ import annotations
 import copy
 import io
 import logging
-import re
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 import pymupdf
 from lxml import etree
@@ -72,10 +71,13 @@ PAGE_TARGET_MM: Tuple[float, float] = (
 
 #: Plexiglas Black product page geometry.
 #: Spec from production: page = Thrucut + 10 mm bleed on every side, with
-#: a TrimBox at the Thrucut so press operators can verify cut/bleed.
-#: This matches the example reference at
-#: tests/files/Example plexiglas black endproduct.pdf where MediaBox is
-#: 245x330 mm and TrimBox is 225x310 mm centred.
+#: a TrimBox at the Thrucut so press operators can verify cut/bleed. The
+#: synthetic reference fixture at
+#: ``tests/fixtures/plexi_pdf_factory.py`` builds an independent PDF with
+#: MediaBox 245x330 mm and TrimBox 225x310 mm centred so the contract
+#: assertions in ``tests/test_plexiglas_black_style.py`` can verify spec
+#: compliance without committing the original 25 MB Adobe Illustrator
+#: reference.
 PLEXI_BLEED_MM: float = 10.0
 PLEXI_PAGE_MM: Tuple[float, float] = (
     THRUCUT_TARGET_MM[0] + 2.0 * PLEXI_BLEED_MM,
@@ -98,10 +100,10 @@ THRUCUT_SPOT_CMYK: Tuple[float, float, float, float] = (0.0, 100.0, 0.0, 0.0)
 WHITE_SPOT_NAME: str = "White"
 
 #: CMYK ink levels for the on-screen / proof representation of the White
-#: spot. Mirrors the production reference (Adobe Illustrator emits the
-#: same magenta tint for both spots in
-#: tests/files/Example plexiglas black endproduct.pdf), so the proof
-#: visual matches what the press operator already expects.
+#: spot. Mirrors the production reference (Adobe Illustrator historically
+#: emitted the same magenta tint for both spots in the original 25 MB
+#: example PDF), so the proof visual matches what the press operator
+#: already expects.
 WHITE_SPOT_CMYK: Tuple[float, float, float, float] = (0.0, 100.0, 0.0, 0.0)
 
 #: Allowlist of supported export styles.
@@ -136,11 +138,12 @@ _BACKGROUND_LAYER_CLASS_TOKENS = frozenset({"background-layer"})
 #: vector style layers that, on a Plexi Black product, must be repainted
 #: onto the /White spot so they print as white ink on the black material.
 #: Anything outside this set (Route, Markers, Overlay, Tekst_laag, …) keeps
-#: its original RGB colours — that mirrors the Adobe Illustrator reference
-#: at ``tests/files/Example plexiglas black endproduct.pdf``, where the
-#: basemap (~28k ops) lives on /Separation /White and the route line plus
-#: overlay text stay in DeviceRGB (``0 0 0 rg`` etc.) so they print as
-#: solid CMYK black on top of the white-inked basemap.
+#: its original RGB colours — that mirrored the original Adobe Illustrator
+#: reference (a 25 MB PDF retired in favour of a synthetic factory under
+#: ``tests/fixtures/plexi_pdf_factory.py``) where the basemap (~28k ops)
+#: lived on /Separation /White and the route line plus overlay text
+#: stayed in DeviceRGB (``0 0 0 rg`` etc.) so they printed as solid CMYK
+#: black on top of the white-inked basemap.
 _WHITE_PLATE_LAYER_IDS = frozenset({"landuse", "water", "roads", "labels"})
 
 #: Class tokens that flag the same basemap layers via ``class=``. Mirrors
@@ -177,6 +180,12 @@ class ExportRequest:
 
 @dataclass
 class ExportResult:
+    """Output of :meth:`PDFExportService.build_pdf`.
+
+    Carries the rendered PDF bytes plus the geometry the service
+    actually produced (so the calling endpoint can populate the
+    ``X-PDF-*`` response headers without re-parsing the PDF).
+    """
     pdf_bytes: bytes
     page_size_mm: Tuple[float, float]
     thrucut_size_mm: Tuple[float, float] = THRUCUT_TARGET_MM
@@ -214,6 +223,14 @@ class PDFExportService:
     # ---------------------------------------------------------------
 
     def build_pdf(self, req: ExportRequest) -> ExportResult:
+        """Render ``req`` to PDF bytes.
+
+        Dispatches on ``req.style`` to either the forex (default,
+        single Thrucut plate) or the plexiglas-black (Thrucut + White
+        plates, TrimBox, transparent background) pipeline. Raises
+        :class:`PDFExportError` for any input the renderer cannot
+        handle so the Flask endpoint can translate it into a JSON 400.
+        """
         page_w_mm, page_h_mm = req.page_mm
         if page_w_mm <= 0 or page_h_mm <= 0:
             raise PDFExportError(
@@ -290,11 +307,12 @@ class PDFExportService:
         #          Tekst_laag, …) → rendered AS-IS so the route line,
         #          marker glyphs and overlay text keep their original
         #          DeviceRGB colours (CMYK black on top of the white-
-        #          inked basemap, mirroring the Adobe Illustrator master
-        #          at tests/files/Example plexiglas black endproduct.pdf
-        #          where ENSCHEDE / 12 april / 42,2 km / S markers are
-        #          all ``0 0 0 rg`` device-RGB and the basemap is the
-        #          one carrying the /CS0 cs spot-colour ops).
+        #          inked basemap, mirroring the original Adobe Illustrator
+        #          master where ENSCHEDE / 12 april / 42,2 km / S markers
+        #          were all ``0 0 0 rg`` device-RGB and the basemap was
+        #          the one carrying the /CS0 cs spot-colour ops. The
+        #          reference is retired from git in favour of the synthetic
+        #          factory at ``tests/fixtures/plexi_pdf_factory.py``).
         rgb_overlay_root: Optional[etree._Element] = None
         if req.style == STYLE_PLEXIGLAS_BLACK:
             _strip_background_layers(art_root)
@@ -416,12 +434,13 @@ class PDFExportService:
         # onto the /White spot. Foreground layers — Route, Markers,
         # Overlay, Tekst_laag — were split off into a separate sub-tree
         # by ``_prepare_drawings`` and are rendered AS-IS, preserving
-        # their DeviceRGB colours. That mirrors the Adobe Illustrator
-        # master at tests/files/Example plexiglas black endproduct.pdf
-        # which has ~28k spot-colour ops on /Separation /White (the
-        # basemap) and a handful of ``0 0 0 rg`` ops in DeviceRGB (the
+        # their DeviceRGB colours. That mirrors the original Adobe
+        # Illustrator master (retired from git) which had ~28k
+        # spot-colour ops on /Separation /White (the basemap) and a
+        # handful of ``0 0 0 rg`` ops in DeviceRGB (the
         # ENSCHEDE/MARATHON/12 april/42,2 km text and the S-marker
-        # glyph).
+        # glyph). See ``tests/fixtures/plexi_pdf_factory.py`` for the
+        # synthetic stand-in used by the regression suite.
         white_spot = PCMYKColorSep(
             *WHITE_SPOT_CMYK,
             spotName=WHITE_SPOT_NAME,
@@ -654,18 +673,18 @@ def _split_white_plate(
     white_plate_root = copy.deepcopy(art_root)
     rgb_overlay_root = copy.deepcopy(art_root)
 
-    _SHARED_LOCALS = ("defs", "style", "title", "desc", "metadata")
+    shared_locals = ("defs", "style", "title", "desc", "metadata")
 
     for child in list(white_plate_root):
         local = etree.QName(child).localname
-        if local in _SHARED_LOCALS:
+        if local in shared_locals:
             continue
         if not _is_white_plate_layer(child):
             white_plate_root.remove(child)
 
     for child in list(rgb_overlay_root):
         local = etree.QName(child).localname
-        if local in _SHARED_LOCALS:
+        if local in shared_locals:
             continue
         if _is_white_plate_layer(child):
             rgb_overlay_root.remove(child)
@@ -687,10 +706,10 @@ def _strip_background_layers(root: etree._Element) -> None:
     Only top-level children are inspected; nested groups (Landuse,
     Water, Roads, …) are left alone because they carry the actual
     visible artwork that should print on the White plate. This matches
-    the production Adobe Illustrator master file at
-    ``tests/files/Example plexiglas black endproduct.pdf`` which has no
-    full-page paint operator on the White plate but does carry tens of
-    thousands of detail-fill ops on it.
+    the original Adobe Illustrator master (retired from git; see
+    ``tests/fixtures/plexi_pdf_factory.py`` for the synthetic
+    stand-in) which had no full-page paint operator on the White plate
+    but did carry tens of thousands of detail-fill ops on it.
     """
     for child in list(root):
         if _is_viewport_background_rect(child) or _is_background_layer_group(child):
@@ -908,9 +927,9 @@ def _merge_plexi_plates(
     The basemap and RGB overlay share a single OCG named after
     ``WHITE_SPOT_NAME`` because production tools (Acrobat, Illustrator,
     Enfocus PitStop) treat "the visible art" as a single togglable
-    layer; the example reference at
-    ``tests/files/Example plexiglas black endproduct.pdf`` likewise
-    keeps both basemap (~28k spot-colour ops) and overlay text (the
+    layer; the original Adobe Illustrator reference (retired from git
+    in favour of ``tests/fixtures/plexi_pdf_factory.py``) likewise
+    kept both basemap (~28k spot-colour ops) and overlay text (the
     ``0 0 0 rg`` device-RGB ENSCHEDE / 12 april / 42,2 km labels) inside
     a single ``Laag 2`` OCG.
 

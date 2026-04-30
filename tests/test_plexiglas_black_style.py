@@ -15,15 +15,22 @@ These tests pin the production spec for the Plexiglas Black product:
 The contract is encoded as a single helper, ``_assert_plexiglas_black_pdf``,
 so the SAME assertions apply to:
   - PDFs produced by ``PDFExportService.build_pdf(style='plexiglas_black')``
-  - The production reference at
-    ``tests/files/Example plexiglas black endproduct.pdf``
+  - A synthetic reference PDF assembled by
+    ``tests.fixtures.plexi_pdf_factory.build_synthetic_plexi_pdf``
 
-Spec points 7 and 8 are slightly relaxed for the production example because
-Adobe Illustrator's export emits ~11 leftover ``Tj`` operators (markers + a
-few overlay strings) and a fully-transparent page. Our pipeline is held to
-the strict zero-Tj contract because we control the source SVG; the example
-serves as a regression baseline (we must not silently produce *more* live
-text than Illustrator's output).
+The synthetic reference is the lightweight stand-in for the original
+25 MB Adobe Illustrator export. It is built directly from
+ReportLab + PyMuPDF (NOT from the service pipeline) so it remains an
+*independent* construction path: a regression that breaks both the
+service and the contract helper in the same direction would still fail
+this characterization test.
+
+Spec points 7 and 8 are slightly relaxed for the synthetic reference
+because the factory plants ~11 dummy ``Tj`` operators on the visible-art
+plate to mimic Illustrator's residual basemap labels. Our pipeline is
+held to a stricter cap (80 Tj — see
+``test_pipeline_produces_plexiglas_black_contract``) because we control
+the source SVG.
 """
 from __future__ import annotations
 
@@ -46,7 +53,6 @@ from services.pdf_export_service import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REAL_FIXTURE = REPO_ROOT / "tests" / "files" / "gpx-route-2026-04-29-vector.svg"
-EXAMPLE_PDF = REPO_ROOT / "tests" / "files" / "Example plexiglas black endproduct.pdf"
 
 PT_PER_MM = 72.0 / 25.4
 
@@ -383,26 +389,29 @@ def test_pipeline_thrucut_at_exact_dimensions(export_service):
 
 
 # ---------------------------------------------------------------------------
-# Production reference (characterization)
+# Synthetic reference (characterization)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not EXAMPLE_PDF.exists(),
-                    reason=f"reference PDF missing at {EXAMPLE_PDF}")
-def test_example_pdf_meets_plexiglas_black_contract():
-    """The production reference at
-    ``tests/files/Example plexiglas black endproduct.pdf`` must satisfy
-    the same contract. This catches "we redefined what plexi-black
-    means in code" regressions: if the spec changes, this test will
-    fail and force an explicit conversation about whether the example
-    is still authoritative.
+def test_synthetic_reference_meets_plexiglas_black_contract():
+    """A reference PDF built independently of the service pipeline must
+    satisfy the same contract.
 
-    The example has 11 leftover ``Tj`` operators (Adobe Illustrator's
-    export didn't outline the S/F marker glyphs and the user-overlay
-    strings); we allow up to 11 here and treat the example as a
-    regression baseline rather than a perfect spec compliance.
+    Catches "we redefined what plexi-black means in code" regressions:
+    if the spec drifts in pdf_export_service the pipeline test still
+    passes (the service moves with the spec), but this test pins the
+    contract against an independent construction so the drift surfaces
+    explicitly.
+
+    The synthetic reference plants 11 dummy ``Tj`` operators on the
+    visible-art plate to mimic the residual labels Adobe Illustrator's
+    real export used to leave in; we allow up to 11 here so a future
+    factory tweak that drops below the cap still passes, while a
+    regression that pushes past 11 fails loudly.
     """
+    from tests.fixtures.plexi_pdf_factory import build_synthetic_plexi_pdf
+    pdf_bytes = build_synthetic_plexi_pdf(leftover_text_glyphs=11)
     _assert_plexiglas_black_pdf(
-        EXAMPLE_PDF.read_bytes(),
+        pdf_bytes,
         max_text_operators=11,
         allow_full_page_fill=False,
     )

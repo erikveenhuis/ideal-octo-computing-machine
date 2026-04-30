@@ -48,13 +48,11 @@ This directory contains the modular components that replaced the original monoli
 - `saveAsPNG()` - Delegates to ImageExporter
 - `saveAsSVG()` - Delegates to SVGExporter
 
-### Legacy Compatibility
+### Application Entry Point
 
-The original `gpx-export-manager.js` now serves as a compatibility adapter that:
-- Maintains the same `GPXExportManager` class interface
-- Delegates to the new modular `ExportManager`
-- Provides deprecation warnings for direct method calls
-- Ensures existing code continues to work without changes
+The application code (`static/js/gpx-app.js`) calls the modular `ExportManager`
+directly. The previous `gpx-export-manager.js` legacy adapter has been removed
+now that nothing depends on its deprecated method names.
 
 ## Benefits of the Modular Structure
 
@@ -95,19 +93,11 @@ const exportManager = new ExportManager(mapManager);
 // Export as high-quality PNG
 await exportManager.saveAsPNG();
 
+// Export as print-ready PDF
+await exportManager.saveAsPDF();
+
 // Export as editable SVG
 await exportManager.saveAsSVG();
-```
-
-### For Legacy Compatibility
-```javascript
-// Updated interface
-const gpxExportManager = new GPXExportManager(mapManager);
-await gpxExportManager.saveAsPNG();
-await gpxExportManager.saveAsSVG();
-
-// Deprecated method (still works but shows warning)
-await gpxExportManager.saveAsImage(); // Deprecated
 ```
 
 ### Direct Component Usage
@@ -139,6 +129,5 @@ The modules must be loaded in this order to resolve dependencies:
 3. `image-exporter.js` - Depends on utilities and synchronizer
 4. `svg-exporter.js` - Depends on utilities
 5. `export-manager.js` - Depends on all other modules
-6. `gpx-export-manager.js` - Legacy adapter (depends on export-manager)
 
 This loading order is configured in the HTML template (`templates/gpx.html`). 

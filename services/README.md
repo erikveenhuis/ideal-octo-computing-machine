@@ -44,6 +44,33 @@ Fetches sports results from Sporthive API:
 - Result normalization
 - Configurable parameters (country, count, etc.)
 
+### PDFExportService (`pdf_export_service.py`)
+Server-side compositor that turns the browser's vector SVG export into a
+print-ready PDF. The service is style-aware and ships two production
+pipelines:
+- **`forex`** (default) — 238.5 x 328.6 mm page, single Thrucut spot
+  separation in an OCG named `Thrucut`. Used for forex / standard prints.
+- **`plexiglas_black`** — 245 x 330 mm page (10 mm bleed each side), adds a
+  second Separation /White plate plus a `White` OCG. Background is left
+  fully transparent so the black plexi shows through. All text is outlined
+  to glyph paths before emit (no live `Tj`).
+
+The service operates purely on the SVG payload posted to `/export-pdf`;
+it does not call any external service. Contract assertions are pinned in
+[`tests/test_plexiglas_black_style.py`](../tests/test_plexiglas_black_style.py)
+and [`tests/test_pdf_export_service.py`](../tests/test_pdf_export_service.py).
+
+**Usage:**
+```python
+service = PDFExportService()
+result = service.build_pdf(ExportRequest(
+    svg_text=svg,
+    page_mm=PLEXI_PAGE_MM,
+    style=STYLE_PLEXIGLAS_BLACK,
+))
+pdf_bytes = result.pdf_bytes
+```
+
 ## Design Principles
 
 All services follow these patterns:

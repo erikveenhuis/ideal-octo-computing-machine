@@ -1,56 +1,51 @@
 #!/bin/bash
+#
+# Local quality gate. Mirrors .github/workflows/pylint.yml so a green
+# local run means a green CI run (and vice versa). Exits non-zero on
+# the first failing check.
+#
+# Usage: ./scripts/quality_check.sh
+#
+set -euo pipefail
 
-# Code Quality Check Script
-# This script runs the same checks that are performed in CI/CD
+cd "$(dirname "$0")/.."
 
-set -e  # Exit on any error
-
-echo "🔍 Running Code Quality Checks..."
-echo "================================="
-
-# Check if we're in the right directory
 if [ ! -f "app.py" ]; then
-    echo "❌ Error: Please run this script from the project root directory"
+    echo "Error: must be run from the project root (or via this script)"
     exit 1
 fi
 
-# Check if pylint is installed
-if ! command -v pylint &> /dev/null; then
-    echo "❌ Error: pylint not found. Please install it with: pip install pylint"
+# 1. Pylint — same explicit production-only file list as CI.
+if ! command -v pylint >/dev/null 2>&1; then
+    echo "Error: pylint is not installed. Run: pip install -r requirements-dev.txt"
     exit 1
 fi
 
-# Find Python files to analyze
-PYTHON_FILES=$(find . -name "*.py" -not -path "./.venv/*" -not -path "./venv/*" -not -path "./build/*" -not -path "./.git/*")
+echo "==> pylint (fail under 9.0)"
+pylint app.py config.py exceptions.py error_handlers.py \
+       utils/*.py services/*.py \
+       --fail-under=9.0
 
-if [ -z "$PYTHON_FILES" ]; then
-    echo "❌ Error: No Python files found to analyze"
+# 2. Pytest with coverage gate.
+if ! command -v pytest >/dev/null 2>&1; then
+    echo "Error: pytest is not installed. Run: pip install -r requirements-dev.txt"
     exit 1
 fi
 
-echo "📁 Found Python files:"
-echo "$PYTHON_FILES" | sed 's/^/  - /'
-echo ""
+echo "==> pytest --cov (fail under 80)"
+pytest --cov=. --cov-report=term --cov-fail-under=80
 
-# Run pylint
-echo "🧹 Running pylint..."
-echo "Minimum score required: 8.0"
-echo ""
-
-if pylint $PYTHON_FILES --fail-under=8.0; then
-    echo ""
-    echo "✅ All code quality checks passed!"
-    echo "🎉 Your code meets the quality standards."
+# 3. JS test harness — same node:test runner CI uses.
+if command -v npm >/dev/null 2>&1; then
+    if [ ! -d "node_modules" ]; then
+        echo "==> installing JS dev deps (npm ci)"
+        npm ci
+    fi
+    echo "==> npm test"
+    npm test
 else
-    echo ""
-    echo "❌ Code quality checks failed!"
-    echo "💡 Tips to fix common issues:"
-    echo "  - Remove trailing whitespace"
-    echo "  - Add missing docstrings"
-    echo "  - Fix import order"
-    echo "  - Break down long functions"
-    echo "  - Add type hints where missing"
-    echo ""
-    echo "📖 Check the pylint output above for specific issues."
-    exit 1
-fi 
+    echo "Warning: npm not found; skipping JS tests."
+fi
+
+echo
+echo "All quality checks passed."

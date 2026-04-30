@@ -66,28 +66,36 @@ This is a simple web application built with Python and Flask that allows users t
 
 This project maintains high code quality standards:
 
-- **Pylint**: 9.98/10 (CI gate: `--fail-under=8.0`)
-- **Pytest**: 180+ tests, ~88% line coverage (CI gate: `--cov-fail-under=80`)
-- **Automated Quality Checks**: GitHub Actions CI/CD pipeline (Python 3.14)
+- **Pylint**: ~9.99/10 (CI gate: `--fail-under=9.0`)
+- **Pytest**: ~300 tests, ~92% line coverage (CI gate: `--cov-fail-under=80`)
+- **JS tests**: 32 `node:test` cases for the SVG export pipeline
+- **CI**: GitHub Actions runs pylint + pytest + `npm test` on Python 3.14
 - **Local Quality Tools**: Run `./scripts/quality_check.sh`
 
-See [CODE_QUALITY.md](CODE_QUALITY.md) for detailed information about code quality standards and tools.
+See [CODE_QUALITY.md](CODE_QUALITY.md) for detailed information about
+code quality standards and tools.
 
 ## Running Tests
 
 ```bash
-# Install dev dependencies (once)
+# Install dev dependencies (once) — required for pytest-cov and pylint
 pip install -r requirements-dev.txt
+npm install
 
-# Run the full test suite
+# Python suite (coverage + 80 % gate are set in pytest.ini)
 pytest
 
-# With coverage
+# Stricter / alternate reports
 pytest --cov=. --cov-report=term-missing
+
+# JavaScript suite
+npm test
 ```
 
-The suite mocks all external HTTP traffic (via `requests-mock`) and the
-Replicate / subprocess boundaries, so it runs offline in well under a second.
+The Python suite mocks all external HTTP traffic (via `requests-mock`)
+and the Replicate / subprocess boundaries, so it runs offline in a few
+seconds. The JS suite uses Node's built-in test runner and `jsdom`, so
+it has no Mapbox dependency.
 
 ## Configuration
 
@@ -102,6 +110,13 @@ loaded from a local `.env` file. Notable variables:
 | `GITHUB_WEBHOOK_SECRET` | yes (for `/webhook`) | HMAC secret for verifying GitHub push webhooks (SHA-256 preferred, SHA-1 supported as legacy fallback). |
 | `FLASK_CONFIG` | no | One of `development` (default), `production`, `testing`. |
 | `HOST` / `PORT` | no | Bind host / port for the local dev server. Defaults: `127.0.0.1:8000`. |
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE).
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Notes
 

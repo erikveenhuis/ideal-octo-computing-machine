@@ -37,7 +37,8 @@ pip-delete-this-directory.txt
 
 # Node.js (only used for the JS test harness under tests-js/)
 node_modules/
-package-lock.json
+# Note: package-lock.json IS committed for reproducible CI test runs
+# (see .github/workflows/pylint.yml#js-tests).
 
 # Unit test / coverage reports
 htmlcov/
@@ -53,6 +54,9 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+
+# Generated test artifacts (PDF exports, debug dumps); keep ``tests/files/`` clean
+tests/_artifacts/
 
 # Translations
 *.mo

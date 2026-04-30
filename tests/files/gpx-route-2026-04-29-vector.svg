@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+Representative GPX-route SVG fixture for the PDF export regression suite.
+
+This is a hand-crafted, ~6 KB stand-in for the user-supplied 4.5 MB real
+production export. It mirrors the production exporter's layer structure
+so the same code path (parse + split + svglib render + spot-colour stamp
++ PyMuPDF merge) is exercised end-to-end:
+
+  - <g id="Background">  full-page tinted backdrop (forex pipeline only)
+  - <g id="Landuse">     basemap polygons (feeds the White plate)
+  - <g id="Water">       basemap polygons (feeds the White plate)
+  - <g id="Roads">       basemap stroke lines (feeds the White plate)
+  - <g id="Labels">      basemap <text> via DIN Pro font-family, with a
+                         halo filter to mirror Mapbox text-halo paint
+                         (kept LIVE so the plexi 'max_text_operators'
+                         assertion still measures Tj leakage)
+  - <g id="Overlay">     the medal-overlay group with the production
+                         scale matrix (1.22074 x 1.21346)
+  - <g id="Thrucut">     the cutter plate, two subpaths (one open!) so
+                         the magenta-flood regression has a target,
+                         styled via an externally-declared .st6 class
+                         which mimics Mapbox's class-resolution edge case
+
+The Thrucut bbox is the same 638.3 x 850.4 user units the synthetic
+unit-test fixture uses, scaled by the same overlay matrix, so the
+service's THRUCUT_TARGET_MM assertions hold without further tuning.
+
+If you regenerate this fixture from a production SVG, the only invariant
+that MUST be preserved is: the .st6 class is declared OUTSIDE the
+<g id="Thrucut"> sub-tree (in a top-level <defs>), because that's what
+exercises the svglib class-resolution defaults the real production
+exporter relies on.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 850 1100"
+     width="850" height="1100">
+  <defs>
+    <style type="text/css"><![CDATA[
+      .st6 { fill: none; stroke: #E6007E; stroke-width: 0.5; }
+      .road { fill: none; stroke: #ffffff; stroke-width: 1.6; stroke-linecap: round; }
+      .water { fill: #c8def2; }
+      .park { fill: #d6ead4; }
+      .label {
+        font-family: 'DIN Pro Bold', 'DIN Pro', sans-serif;
+        font-size: 11px;
+        fill: #1a1a1a;
+        text-anchor: middle;
+      }
+      .label-small {
+        font-family: 'DIN Pro Medium', 'DIN Pro', sans-serif;
+        font-size: 8px;
+        fill: #4a4a4a;
+        text-anchor: middle;
+      }
+    ]]></style>
+    <filter id="halo" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.8"/>
+      <feFlood flood-color="#ffffff" flood-opacity="0.85"/>
+      <feComposite in2="SourceAlpha" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g id="Background">
+    <rect x="0" y="0" width="850" height="1100" fill="#f4ede0" />
+  </g>
+
+  <g id="Landuse" class="landuse-layer">
+    <polygon class="park" points="60,80 320,70 360,260 220,310 110,250" />
+    <polygon class="park" points="500,520 720,500 780,710 640,780 520,710" />
+    <rect x="40" y="900" width="780" height="120" class="park" />
+  </g>
+
+  <g id="Water">
+    <polygon class="water" points="0,400 250,390 350,420 600,360 850,400 850,540 0,540" />
+    <polygon class="water" points="640,820 760,800 780,910 660,930" />
+  </g>
+
+  <g id="Roads">
+    <path class="road" d="M40 1050 L820 50" />
+    <path class="road" d="M40 50 L820 1050" />
+    <path class="road" d="M40 540 L820 540" />
+    <path class="road" d="M425 50 L425 1050" />
+    <path class="road" d="M120 200 Q 425 700 740 880" />
+  </g>
+
+  <g id="Labels">
+    <text class="label" x="200" y="180" filter="url(#halo)">ROTTERDAM-NOORD</text>
+    <text class="label" x="640" y="640" filter="url(#halo)">FEIJNOORD</text>
+    <text class="label-small" x="425" y="540">NIEUWE MAAS</text>
+    <text class="label-small" x="700" y="860">PARK 16HOVEN</text>
+    <text class="label-small" x="200" y="980">AFRIKAANDERWIJK</text>
+  </g>
+
+  <g id="Overlay" transform="translate(0,0) scale(1.22074, 1.21346)">
+    <rect x="100" y="100" width="500" height="700" fill="none"
+          stroke="#222" stroke-width="0.4" />
+    <text x="350" y="60" text-anchor="middle"
+          font-family="'DIN Pro Bold', sans-serif" font-size="14" fill="#222">
+      MARATHON 2026
+    </text>
+  </g>
+
+  <!--
+    Two-subpath cut path: the first subpath is OPEN (no Z) which is
+    exactly the geometry that triggered the magenta-flood regression
+    when svglib's class resolution defaulted to fillColor=black,
+    strokeColor=None. The .st6 class above keeps it stroke-only after
+    the spot-colour stamp.
+  -->
+  <g id="Thrucut" data-cut-type="thrucut"
+     transform="translate(0,0) scale(1.22074, 1.21346)">
+    <path class="st6"
+          d="M554.2,27.3 h113.4 v850.4
+             M667.6,877.7 V27.3 H554.2 v0
+             c0,3.3 -2.7,6 -6,6 H446.9
+             c-3.3,0 -6,-2.7 -6,-6 v0
+             H29.3 v850.4 H667.6 z" />
+    <path class="st6"
+          d="M29.3,27.3 H440.9 v6 c0,0 -3,0 -3,3 v0 H29.3 z" />
+  </g>
+</svg>

@@ -2,172 +2,144 @@
 
 This document outlines the code quality standards and tools used in this project.
 
-## 🎯 Quality Standards
+## Quality Standards
 
-Our codebase maintains high quality standards with:
-- **Pylint score**: Minimum 8.0/10.0
-- **Code formatting**: Consistent style across all Python files
-- **Type hints**: Added where beneficial
-- **Documentation**: Clear docstrings for modules, classes, and functions
-- **Error handling**: Proper exception handling with custom exception classes
+The codebase is held to:
 
-## 🛠️ Tools Used
+- **Pylint score**: minimum 9.0/10.0 (CI hard fail). Production code currently
+  scores ~9.99/10.
+- **Pytest**: ~300 tests, ~92% line coverage. Both CI and the default
+  `pytest` invocation (via `pytest.ini` `addopts`) enforce
+  `--cov-fail-under=80` once `pytest-cov` is installed from
+  `requirements-dev.txt`.
+- **Code formatting**: 100-char line length, consistent style across all
+  Python files.
+- **Type hints**: required on all new public service / utility functions.
+- **Documentation**: module-, class- and public-function docstrings.
+- **Error handling**: use the custom exception hierarchy in
+  [`exceptions.py`](exceptions.py); see
+  [`EXCEPTION_GUIDE.md`](EXCEPTION_GUIDE.md).
 
-### Primary Tools
-- **Pylint**: Code analysis and quality scoring
-- **GitHub Actions**: Automated CI/CD pipeline for quality checks
-- **Custom Scripts**: Local quality checking tools
+## Tools
 
-### Development Tools (Optional)
-- **Black**: Code formatting
-- **isort**: Import sorting
-- **mypy**: Static type checking
-- **pytest**: Unit testing framework
+### Enforced in CI ([`.github/workflows/pylint.yml`](.github/workflows/pylint.yml))
 
-## 🚀 Quick Start
+- **Pylint** — production source files only.
+- **Pytest + pytest-cov** — full Python suite with `--cov-fail-under=80`.
+- **Node `--test`** — JS test harness in [`tests-js/`](tests-js/).
 
-### Run Quality Checks Locally
+### Enforced locally via [`.pre-commit-config.yaml`](.pre-commit-config.yaml)
+
+- `pylint`, `bandit`, `black --check`, trailing-whitespace and
+  end-of-file-fixer hooks.
+
+### Available in [`requirements-dev.txt`](requirements-dev.txt) but optional
+
+- `mypy`, `isort`, `flake8`, `safety`, `sphinx`. Run them ad-hoc during
+  refactors; they are not blocking.
+
+## Quick Start
+
+### Run all quality checks locally
 
 ```bash
-# Quick check
 ./scripts/quality_check.sh
-
-# Or run pylint directly
-pylint $(find . -name "*.py" -not -path "./.venv/*") --fail-under=8.0
 ```
 
-### Install Development Dependencies
+This runs the same canonical pylint command as CI, plus `pytest --cov`
+and `npm test`.
+
+### Install development dependencies
 
 ```bash
-# Install all development tools
 pip install -r requirements-dev.txt
-
-# Or just install pylint
-pip install pylint
+pre-commit install   # one-time, auto-runs hooks on git commit
 ```
 
-## 🔧 Configuration
+## Configuration
 
-### Pylint Configuration
-Our pylint configuration (`.pylintrc`) is customized for this Flask application:
+### Pylint (`.pylintrc`)
 
-**Disabled Checks** (too strict for our use case):
-- `import-error`: Dependencies might not be available in CI
-- `too-many-arguments`: Services often need multiple parameters
-- `broad-exception-caught`: Acceptable for API services
-- `trailing-whitespace`: Handled automatically
+The configuration is tuned for this Flask application:
 
-**Custom Limits**:
-- Maximum line length: 100 characters
-- Maximum arguments: 7
-- Maximum local variables: 20
-- Minimum pylint score: 8.0
+- **Disabled checks** considered unhelpful here: `import-error` (deps not
+  installed in pylint subshell on contributors' machines), `too-many-*`
+  bouquet (services intentionally have wide signatures),
+  `broad-exception-caught` (acceptable at API boundary),
+  `trailing-whitespace` and `line-too-long` (handled by Black + editor).
+- **Limits**: `max-line-length=100`, `max-args=7`, `max-locals=20`,
+  `max-module-lines=1000`, minimum score 8.0/10.
 
-### GitHub Actions
+### CI (`.github/workflows/pylint.yml`)
+
 Quality checks run automatically on:
-- Push to `main` or `develop` branches
-- Pull requests to `main` or `develop` branches
-- Multiple Python versions (3.11, 3.12, 3.13)
 
-## 📋 Quality Checklist
+- Pushes to `main` / `develop`
+- Pull requests targeting `main` / `develop`
 
-Before committing code, ensure:
+Python target: 3.14. The pylint command is:
 
-- [ ] **Pylint score ≥ 8.0**: Run `./scripts/quality_check.sh`
-- [ ] **No trailing whitespace**: Automatically cleaned by our tools
-- [ ] **Proper imports**: Flask/external imports at the top
-- [ ] **Docstrings**: Added for new functions/classes
-- [ ] **Error handling**: Uses our custom exception classes
-- [ ] **Type hints**: Added for new functions (where beneficial)
-- [ ] **Constants**: Magic numbers replaced with named constants
+```bash
+pylint app.py config.py exceptions.py error_handlers.py \
+       utils/*.py services/*.py \
+       --fail-under=9.0
+```
 
-## 🔍 Common Issues and Fixes
+This list is curated explicitly because pylint's import resolution is
+order-sensitive when files are passed individually — the order here keeps
+`from config import …` resolvable from `services/*.py`.
 
-### Import Errors in CI/CD
-**Issue**: `E0401: Unable to import 'flask'`
-**Fix**: Dependencies are installed in CI, these errors are disabled in our config.
+## Quality Checklist (before committing)
 
-### Trailing Whitespace
-**Issue**: `C0303: Trailing whitespace`
-**Fix**: Run our quality script which automatically removes trailing whitespace.
+- [ ] `pre-commit run --all-files` passes (or just `git commit` — hooks run
+      on staged files automatically)
+- [ ] `pytest --cov=. --cov-fail-under=80` passes
+- [ ] `npm test` passes
+- [ ] No new `# pylint: disable=` lines without an inline comment
+      explaining why
 
-### Too Many Arguments
-**Issue**: `R0913: Too many arguments`
-**Solution**: 
-1. Use configuration objects
-2. Group related parameters
-3. Consider if the function is doing too much
+## Common Issues
 
-### Long Lines
-**Issue**: `C0301: Line too long`
-**Fix**: Break long lines at logical points (after commas, before operators).
+### Import errors in CI/CD
 
-### Missing Docstrings
-**Issue**: `C0111: Missing function docstring`
-**Fix**: Add descriptive docstrings with Args, Returns, and Raises sections.
+`E0401: Unable to import 'flask'` — disabled by `.pylintrc`. CI installs
+all deps before running pylint anyway.
 
-## 📈 Improving Code Quality
+### Too many arguments
 
-### 1. Gradual Improvement
-- Start with fixing high-impact issues
-- Focus on one module at a time
-- Aim for incremental score improvements
+`R0913` — Use a config object or split the function. The `R0913` warning
+itself is disabled but reviewers should still push back when a method
+sprouts more than ~7 arguments.
 
-### 2. Best Practices
-- **Single Responsibility**: Each function should have one clear purpose
-- **Clear Naming**: Use descriptive variable and function names
-- **Error Handling**: Use specific exception types
-- **Documentation**: Keep docstrings up to date
+### Long lines
 
-### 3. Monitoring
-- Check pylint score regularly
-- Monitor CI/CD pipeline status
-- Review quality metrics in pull requests
+`C0301` is disabled but Black breaks at 100 chars on save.
 
-## 🚫 Bypassing Quality Checks
+### Missing docstrings
 
-In rare cases, you might need to disable specific pylint warnings:
+`C0111` — add a docstring with Args, Returns, Raises sections for any
+new public function.
+
+## Bypassing Quality Checks
+
+In rare cases, you may need to disable a specific pylint warning:
 
 ```python
-# Disable for a single line
-result = some_function()  # pylint: disable=some-warning
-
-# Disable for a block
-# pylint: disable=broad-exception-caught
-try:
-    risky_operation()
-except Exception as e:
-    handle_any_error(e)
-# pylint: enable=broad-exception-caught
+result = some_function()  # pylint: disable=some-warning  # justification
 ```
 
-**Use sparingly** and always document why the check is disabled.
+Always include an inline justification. CI has no allow-list mechanism,
+so unjustified `disable=` lines slip through silently otherwise.
 
-## 📊 Quality Metrics
+## Quality Metrics (snapshot)
 
-Current project status:
-- **Overall Pylint Score**: 10.0/10.0 ✅
-- **Files Analyzed**: 11 Python files
-- **CI/CD Status**: Passing ✅
-- **Code Coverage**: Not yet implemented
-- **Security Scan**: Not yet implemented
+- **Pylint score**: ~9.9/10 (production code)
+- **Files analysed by pylint**: 12 production modules
+- **Pytest tests**: ~300, all green
+- **Coverage**: ~92% line coverage, gated at 80%
+- **JS tests**: 32, all green
 
-## 🛣️ Future Improvements
+## Future Improvements
 
-Planned quality enhancements:
-1. **Add unit tests** with pytest and coverage reporting
-2. **Implement pre-commit hooks** for automatic quality checks
-3. **Add security scanning** with bandit
-4. **Integrate type checking** with mypy
-5. **Add dependency vulnerability scanning** with safety
-
-## 📞 Getting Help
-
-- **Local Issues**: Run `./scripts/quality_check.sh` for detailed output
-- **CI/CD Issues**: Check GitHub Actions logs
-- **Configuration Questions**: Review `.pylintrc` file
-- **Best Practices**: Follow the examples in existing service modules
-
----
-
-Remember: Quality tools are here to help, not hinder. They catch issues early and maintain consistency across the codebase. If you encounter persistent issues, consider if the code needs refactoring rather than disabling warnings. 
+Tracked separately in GitHub Issues. The long-running historical wishlist
+under [`docs/history/`](docs/history/) is no longer the source of truth.
