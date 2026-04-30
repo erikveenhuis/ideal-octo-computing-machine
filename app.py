@@ -607,6 +607,10 @@ def detailed_health_check():
 def version_info():
     """Simple version endpoint showing current commit information."""
     git_info = get_git_commit_info()
+    route_post_export_pdf = any(
+        r.rule == '/export-pdf' and 'POST' in r.methods
+        for r in app.url_map.iter_rules()
+    )
     return jsonify({
         'version': '1.0.0',
         'commit': git_info.get('short_hash'),
@@ -614,7 +618,10 @@ def version_info():
         'date': git_info.get('date'),
         'branch': git_info.get('branch'),
         'author': git_info.get('author'),
-        'timestamp': datetime.now(timezone.utc).isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'app_py_path': os.path.abspath(__file__),
+        'process_cwd': os.getcwd(),
+        'route_post_export_pdf': route_post_export_pdf,
     })
 
 # Actually run the app when this script is executed directly. This entrypoint

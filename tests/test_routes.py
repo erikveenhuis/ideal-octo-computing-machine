@@ -51,6 +51,9 @@ def test_version_returns_json(client):
     payload = response.get_json()
     assert payload["version"]
     assert "timestamp" in payload
+    assert payload["route_post_export_pdf"] is True
+    assert payload["app_py_path"]
+    assert payload["process_cwd"]
 
 
 # ---------------------------------------------------------------------------
