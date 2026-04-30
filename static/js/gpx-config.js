@@ -1,7 +1,6 @@
 // Map styles configuration
 const mapStyles = {
     'forex': 'mapbox://styles/erikveenhuis/cmb9e07eg00ui01sd37h67oui',
-    'plexiglas': 'mapbox://styles/erikveenhuis/cmb9esh6700u701r41sxu3dnr',
     'plexiglas_black': 'mapbox://styles/erikveenhuis/cmbkgyte200or01s5dtabce0c'
 };
 

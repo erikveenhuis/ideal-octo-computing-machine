@@ -67,11 +67,9 @@ class PDFExporter {
      * Resolve which export style the current map view is using.
      *
      * The Mapbox style dropdown in [templates/components/gpx_controls.html]
-     * exposes three values: ``forex``, ``plexiglas`` (white plexi), and
-     * ``plexiglas_black``. Only ``plexiglas_black`` triggers the
-     * spot-colour-White / outlined-text / transparent-background pipeline;
-     * the other two ride on the existing forex pipeline (which has been
-     * production-validated for the white plexi product as well).
+     * exposes ``forex`` and ``plexiglas_black``. Only ``plexiglas_black``
+     * triggers the spot-colour-White / outlined-text / transparent-background
+     * pipeline; ``forex`` uses the standard Thrucut export pipeline.
      *
      * Anything we don't recognise (no map manager loaded yet, future style
      * keys, etc.) falls back to forex so a fresh deploy never accidentally

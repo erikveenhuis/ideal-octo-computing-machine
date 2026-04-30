@@ -50,7 +50,7 @@ class GPXApp {
             }
         };
         this.overlayTextState = {};
-        this.overlayTextValues = { ...this.overlayTextDefaults.medal_default };
+        this.overlayTextValues = { ...this.overlayTextDefaults.medal_plain };
         this.currentOverlayExportData = null;
         
         this.init();

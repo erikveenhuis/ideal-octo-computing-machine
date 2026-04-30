@@ -14,12 +14,8 @@ class StyleAnalyzer {
         // Improved style detection with better defaults
         if (styleName.includes('forex')) {
             backgroundColor = '#f5f5f5'; // Light gray for Forex
-        } else if (styleName.includes('plexiglas')) {
-            if (styleName.includes('black')) {
-                backgroundColor = '#000000'; // Plexiglas black
-            } else {
-                backgroundColor = '#ffffff'; // Plexiglas white
-            }
+        } else if (styleName.includes('plexiglas') && styleName.includes('black')) {
+            backgroundColor = '#000000'; // Plexiglas black
         }
         
         if (mapStyle && mapStyle.layers) {

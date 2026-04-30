@@ -50,7 +50,6 @@
             <select id="mapStyle" 
                 class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
                 <option value="forex" selected>Forex Style</option>
-                <option value="plexiglas">Plexiglas Style</option>
                 <option value="plexiglas_black">Plexiglas Black Style</option>
             </select>
         </div>
@@ -58,10 +57,10 @@
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Overlay:</label>
             <select id="overlaySelect"
                 class="w-40 px-2 py-1 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:text-white">
-                <option value="none" data-src="" selected>No overlay</option>
+                <option value="none" data-src="">No overlay</option>
                 <option value="medal_default" data-src="{{ url_for('static', filename='Overlay, medaille rechts.svg') }}">Medal overlay</option>
                 <option value="medal_boxes" data-src="{{ url_for('static', filename='Overlay, medaille rechts, boxes.svg') }}">Medal overlay (boxes)</option>
-                <option value="medal_plain" data-src="{{ url_for('static', filename='Overlay, medaille rechts, plain.svg') }}">Medal overlay (plain)</option>
+                <option value="medal_plain" data-src="{{ url_for('static', filename='Overlay, medaille rechts, plain.svg') }}" selected>Medal overlay (plain)</option>
             </select>
         </div>
         <div id="overlayTextFields" class="space-y-2 hidden">
