@@ -99,11 +99,14 @@ THRUCUT_SPOT_CMYK: Tuple[float, float, float, float] = (0.0, 100.0, 0.0, 0.0)
 WHITE_SPOT_NAME: str = "White"
 
 #: CMYK ink levels for the on-screen / proof representation of the White
-#: spot. Mirrors the production reference (Adobe Illustrator historically
-#: emitted the same magenta tint for both spots in the original 25 MB
-#: example PDF), so the proof visual matches what the press operator
-#: already expects.
-WHITE_SPOT_CMYK: Tuple[float, float, float, float] = (0.0, 100.0, 0.0, 0.0)
+#: spot. Cyan is used here so the White plate is visually distinct from
+#: the Thrucut plate (which proofs as magenta) when both separations are
+#: viewed together — important on the Plexiglas Black product where the
+#: two spots overlap heavily and a shared magenta tint would make it
+#: impossible to tell the basemap from the cut line in a soft proof.
+#: The actual press output is unaffected: production tools key off the
+#: spot *name* (``WHITE_SPOT_NAME``), not the proof CMYK fallback.
+WHITE_SPOT_CMYK: Tuple[float, float, float, float] = (100.0, 0.0, 0.0, 0.0)
 
 #: Allowlist of supported export styles.
 STYLE_FOREX: str = "forex"
