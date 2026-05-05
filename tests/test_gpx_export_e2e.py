@@ -2,7 +2,7 @@
 
 This test exercises the full server-facing slice of the export pipeline:
 
-    1. The /gpx page renders with all the JS modules wired up that the
+    1. The main page (``/``) renders with all the JS modules wired up that the
        browser side of the export needs (overlay-cut-extractor, svg-
        renderer, svg-exporter, gpx-app).
     2. POSTing a real GPX file to /upload-gpx produces a JSON payload
@@ -38,13 +38,13 @@ def gpx_bytes() -> bytes:
 
 
 def test_gpx_page_loads_export_pipeline_scripts(client):
-    """The /gpx template wires up every JS module the SVG export depends on.
+    """The GPX template wires up every JS module the SVG export depends on.
 
     If any of these script tags get dropped (e.g. during a refactor),
     the browser side of the export blows up at runtime in a way that is
     hard to reproduce in unit tests. This makes that contract explicit.
     """
-    response = client.get("/gpx")
+    response = client.get("/")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
 
@@ -62,7 +62,7 @@ def test_gpx_page_loads_export_pipeline_scripts(client):
         "gpx-app.js",
     ]
     for script in expected_scripts:
-        assert script in body, f"/gpx template no longer loads {script}"
+        assert script in body, f"GPX page template no longer loads {script}"
 
     # A Mapbox token must reach the rendered page so the export can query
     # map features. If this is missing or empty the front-end bails out

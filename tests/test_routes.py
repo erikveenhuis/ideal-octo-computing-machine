@@ -14,10 +14,22 @@ import requests
 # ---------------------------------------------------------------------------
 
 
-def test_index_renders(client):
+def test_index_renders_gpx_page(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert b"<form" in response.data or b"<input" in response.data
+    assert b"mapbox-gl" in response.data
+
+
+def test_race_results_renders(client):
+    response = client.get("/results")
+    assert response.status_code == 200
+    assert b"searchForm" in response.data or b"<form" in response.data
+
+
+def test_gpx_legacy_path_redirects(client):
+    response = client.get("/gpx", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.location.endswith("/")
 
 
 def test_health_returns_json(client):
@@ -38,9 +50,7 @@ def test_health_detailed_reports_services(client):
     payload = response.get_json()
 
     services = payload["services"]
-    # Tokens are injected by conftest.py, so all three should be configured.
     assert services["mapbox"]["configured"] is True
-    assert services["replicate"]["configured"] is True
     assert services["webhook"]["configured"] is True
     assert payload["status"] in {"healthy", "degraded"}
 
@@ -124,7 +134,7 @@ def test_search_rejects_invalid_year(client, mocker):
 
 
 def test_gpx_page_renders_with_token(client):
-    response = client.get("/gpx")
+    response = client.get("/")
     assert response.status_code == 200
     # Page references Mapbox GL JS via the templates/components include.
     assert b"mapbox-gl" in response.data
@@ -134,7 +144,7 @@ def test_gpx_page_500_when_token_missing(flask_app, client):
     original = flask_app.config["MAPBOX_ACCESS_TOKEN"]
     flask_app.config["MAPBOX_ACCESS_TOKEN"] = ""
     try:
-        response = client.get("/gpx")
+        response = client.get("/")
         assert response.status_code == 500
     finally:
         flask_app.config["MAPBOX_ACCESS_TOKEN"] = original
@@ -147,24 +157,6 @@ def test_upload_gpx_requires_file(client):
     assert response.get_json()["error"]
 
 
-# ---------------------------------------------------------------------------
-# Image transform
-# ---------------------------------------------------------------------------
-
-
-def test_image_transform_renders_when_configured(client):
-    response = client.get("/image-transform")
-    assert response.status_code == 200
-
-
-def test_image_transform_unavailable_when_token_missing(flask_app, client, mocker):
-    mocker.patch.object(
-        __import__("app").image_transform_service,
-        "is_available",
-        return_value=False,
-    )
-    response = client.get("/image-transform")
-    assert response.status_code == 503
 
 
 # ---------------------------------------------------------------------------

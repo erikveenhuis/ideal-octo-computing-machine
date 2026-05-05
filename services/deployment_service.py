@@ -17,6 +17,28 @@ from flask import current_app
 from exceptions import GitOperationError, ServiceRestartError
 
 
+def _infer_pythonanywhere_wsgi_touch_path() -> Optional[str]:
+    """Return the dashboard WSGI file path used to trigger reloads via ``touch``.
+
+    PythonAnywhere stores this under ``/var/www/<username>_pythonanywhere_com_wsgi.py``.
+    When ``FLASK_CONFIG`` is unset the app loads ``DevelopmentConfig``, which leaves
+    ``WSGI_FILE_PATH`` empty; inferring this path restores automatic reload after
+    git-based deploys without hard-coding env vars.
+
+    ``None`` if the path cannot be inferred or does not exist (e.g. local dev).
+    """
+    home = os.path.expanduser("~")
+    if not home or home == "~":
+        return None
+    username = os.path.basename(home.rstrip(os.sep))
+    if not username or username == home:
+        return None
+    candidate = f"/var/www/{username}_pythonanywhere_com_wsgi.py"
+    if os.path.exists(candidate):
+        return candidate
+    return None
+
+
 class DeploymentService:
     """Service for handling deployment operations."""
 
@@ -195,24 +217,32 @@ class DeploymentService:
 
     def _reload_application(self) -> None:
         """Reload the WSGI application."""
-        if not self.wsgi_file_path:
+        touch_path = self.wsgi_file_path or _infer_pythonanywhere_wsgi_touch_path()
+
+        if not touch_path:
             self._log_info("No WSGI file path configured, skipping application reload")
             return
-            
-        if not os.path.exists(self.wsgi_file_path):
-            self._log_error(f"WSGI file not found at: {self.wsgi_file_path}")
+
+        if not self.wsgi_file_path:
+            self._log_info(
+                "Inferred PythonAnywhere WSGI path for reload (set "
+                "FLASK_CONFIG=production or WSGI_FILE_PATH to make this explicit)"
+            )
+
+        if not os.path.exists(touch_path):
+            self._log_error(f"WSGI file not found at: {touch_path}")
             return
 
         try:
             # First touch to trigger reload
-            subprocess.run(['touch', self.wsgi_file_path], check=True, timeout=10)
+            subprocess.run(['touch', touch_path], check=True, timeout=10)
             self._log_info("Successfully touched WSGI file")
 
             # Wait for old workers to start shutting down
             time.sleep(2)
 
             # Touch again to ensure new workers start
-            subprocess.run(['touch', self.wsgi_file_path], check=True, timeout=10)
+            subprocess.run(['touch', touch_path], check=True, timeout=10)
             self._log_info("Touched WSGI file again to ensure new workers start")
 
         except subprocess.CalledProcessError as e:

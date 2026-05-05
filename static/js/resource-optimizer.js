@@ -49,10 +49,10 @@ class ResourceOptimizer {
         const currentPath = window.location.pathname;
         
         // Navigation predictions based on current page
+        // Main page is the GPX map; race search lives at /results.
         const preloadMap = {
-            '/': ['/gpx', '/image-transform'],
-            '/gpx': ['/'],
-            '/image-transform': ['/']
+            '/': ['/results'],
+            '/results': ['/'],
         };
 
         const preloadResources = preloadMap[currentPath];
@@ -101,10 +101,8 @@ class ResourceOptimizer {
         for (const page of pages) {
             try {
                 // Preload page-specific resources
-                if (page === '/gpx') {
+                if (page === '/' || page === '/gpx') {
                     await this.preloadMapboxResources();
-                } else if (page === '/image-transform') {
-                    await this.preloadImageProcessingResources();
                 }
             } catch (error) {
                 console.warn(`Failed to preload resources for ${page}:`, error);
@@ -113,23 +111,12 @@ class ResourceOptimizer {
     }
 
     /**
-     * Preload Mapbox resources
+     * Preload Mapbox resources (GPX viewer is served at /).
      */
     async preloadMapboxResources() {
         const resources = [
             'https://api.mapbox.com/mapbox-gl-js/v3.22.0/mapbox-gl.css',
             'https://api.mapbox.com/mapbox-gl-js/v3.22.0/mapbox-gl.js'
-        ];
-
-        return this.preloadResources(resources);
-    }
-
-    /**
-     * Preload image processing resources
-     */
-    async preloadImageProcessingResources() {
-        const resources = [
-            'https://cdn.jsdelivr.net/npm/pica@9.0.1/dist/pica.min.js'
         ];
 
         return this.preloadResources(resources);
@@ -240,8 +227,8 @@ class ResourceOptimizer {
      */
     preloadFormResources(form) {
         // Check if form has file input
-        if (form.querySelector('input[type="file"]')) {
-            this.preloadImageProcessingResources();
+        if (form.querySelector('#gpxFiles, input[type="file"][accept*=".gpx"]')) {
+            this.preloadMapboxResources();
         }
     }
 

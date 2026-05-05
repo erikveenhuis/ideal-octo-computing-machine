@@ -25,7 +25,6 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', _DEV_SECRET_FALLBACK)
 
     # API Tokens
-    REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN')
     MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN')
     GITHUB_WEBHOOK_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET')
 
@@ -55,21 +54,6 @@ class Config:
     DEFAULT_COUNTRY_CODE = 'NL'
     DEFAULT_RESULT_COUNT = 15
     DEFAULT_RESULT_OFFSET = 0
-
-    # Image Processing
-    REPLICATE_MODEL = (
-        "fofr/latent-consistency-model:"
-        "683d19dc312f7a9f0428b04429a9ccefd28dbf7785fef083ad5cf991b65f406f"
-    )
-    IMAGE_TRANSFORM_PROMPT = (
-        "pure white background, bright white background, solid white background, "
-        "no gray, no shadows, no gradients, professional product photography, "
-        "studio lighting, commercial product shot, high-end product photography, "
-        "clean background, professional lighting setup, product centered, "
-        "sharp focus, 8k resolution, studio quality, product showcase, "
-        "maintain original product, preserve product details, "
-        "keep original product exactly as is, only enhance background and lighting"
-    )
 
     # File Upload Settings (moved to FileExtensions constants class)
 

@@ -19,10 +19,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Force the testing config and a deterministic Mapbox token before importing
-# the app so that the /gpx route does not raise during route tests.
+# the app so that the GPX main page does not raise during route tests.
 os.environ.setdefault("FLASK_CONFIG", "testing")
 os.environ.setdefault("MAPBOX_ACCESS_TOKEN", "pk.test-token")
-os.environ.setdefault("REPLICATE_API_TOKEN", "r8_test-token")
 os.environ.setdefault("GITHUB_WEBHOOK_SECRET", "test-webhook-secret")
 
 

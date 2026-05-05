@@ -27,7 +27,6 @@ from exceptions import (
     GitOperationError,
     GPXProcessingError,
     ImageProcessingError,
-    ImageTransformServiceError,
     InputValidationError,
     SearchError,
     ServiceRestartError,
@@ -194,17 +193,12 @@ class TestServiceSpecificErrors:
         [
             (UitslagenServiceError, "Uitslagen.nl"),
             (SporthiveServiceError, "Sporthive"),
-            (ImageTransformServiceError, "Replicate"),
         ],
     )
     def test_service_errors_carry_correct_source(self, cls, expected_source):
         e = cls("oops")
         assert e.source == expected_source
         assert e.api_name == expected_source
-
-    def test_image_transform_keeps_model_id(self):
-        e = ImageTransformServiceError("fail", model_id="m1")
-        assert e.model_id == "m1"
 
 
 class TestSearchError:

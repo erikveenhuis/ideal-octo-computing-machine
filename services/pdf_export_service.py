@@ -42,7 +42,6 @@ import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-import pymupdf
 from lxml import etree
 from reportlab.graphics import renderPDF
 from reportlab.lib.colors import PCMYKColorSep
@@ -202,6 +201,23 @@ class PDFExportError(Exception):
     The endpoint translates this to a ``400 Bad Request`` with a JSON body so
     the front-end shows a toast instead of a silent failure.
     """
+
+
+def _get_pymupdf():
+    """Load PyMuPDF on first PDF merge so import-time does not require it.
+
+    The package is listed in ``requirements.txt`` as ``pymupdf``, but hosts
+    (e.g. PythonAnywhere) sometimes boot the WSGI file before ``pip install``
+    has been run; lazy import keeps the rest of the site reachable.
+    """
+    try:
+        import pymupdf as pymupdf_module
+    except ModuleNotFoundError as exc:
+        raise PDFExportError(
+            "PDF export requires PyMuPDF. Install with: pip install pymupdf "
+            "(see requirements.txt), then restart the web app."
+        ) from exc
+    return pymupdf_module
 
 
 # ---------------------------------------------------------------------------
@@ -891,6 +907,7 @@ def _merge_with_ocg(art_pdf: bytes, thrucut_pdf: bytes, *, ocg_name: str) -> byt
     "Thrucut" layer in PDF viewers (Acrobat, Preview, Illustrator) while
     still producing the spot-colour separation on the cutter plate.
     """
+    pymupdf = _get_pymupdf()
     art_doc = pymupdf.open(stream=art_pdf, filetype="pdf")
     thrucut_doc = pymupdf.open(stream=thrucut_pdf, filetype="pdf")
     try:
@@ -947,6 +964,7 @@ def _merge_plexi_plates(
     as the base because that would conflate one plate's content with
     the page itself, leaving it un-OCG-wrapped.
     """
+    pymupdf = _get_pymupdf()
     out = pymupdf.open()
     page = out.new_page(width=base_w_pt, height=base_h_pt)
 
@@ -1022,6 +1040,7 @@ def _set_page_trimbox_mm(
     right_pt = _mm_to_pt(right_mm)
     top_pt = _mm_to_pt(top_mm)
 
+    pymupdf = _get_pymupdf()
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         page = doc[page_index]

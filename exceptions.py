@@ -241,15 +241,6 @@ class SporthiveServiceError(ExternalAPIError):
         super().__init__(message, 'Sporthive', endpoint, status_code)
 
 
-class ImageTransformServiceError(ExternalAPIError):
-    """Raised when Replicate image transformation fails."""
-
-    def __init__(self, message: str, model_id: Optional[str] = None,
-                 status_code: int = 500):
-        super().__init__(message, 'Replicate', model_id, status_code)
-        self.model_id = model_id
-
-
 # ============================================================================
 # Utility Functions
 # ============================================================================
@@ -271,7 +262,7 @@ def get_exception_hierarchy() -> Dict[str, list]:
             'ExternalAPIError', 'APITimeoutError', 'APIRateLimitError'
         ],
         'ExternalAPIError': [
-            'UitslagenServiceError', 'SporthiveServiceError', 'ImageTransformServiceError'
+            'UitslagenServiceError', 'SporthiveServiceError'
         ],
         'ValidationError': [
             'InputValidationError', 'DataValidationError'

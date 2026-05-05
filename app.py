@@ -2,9 +2,8 @@
 Flask application for sports results search and GPX file processing.
 
 This application provides:
+- GPX file upload and processing with route visualization (main entry page)
 - Search functionality for athlete results from multiple sports data sources
-- GPX file upload and processing with route visualization
-- Image transformation services for background removal
 - API endpoints for health checks and webhooks
 
 Note: code-update / dependency-install logic intentionally lives in
@@ -18,7 +17,7 @@ import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
@@ -34,7 +33,6 @@ from error_handlers import register_error_handlers
 from exceptions import APIError, ValidationError, FileUploadError
 from services.uitslagen_service import UitslagenService
 from services.sporthive_service import SporthiveService
-from services.image_transform_service import ImageTransformService
 from services.gpx_processing_service import GPXProcessingService
 from services.deployment_service import DeploymentService
 from services.pdf_export_service import (
@@ -69,11 +67,6 @@ def _build_services(flask_app):
             default_count=flask_app.config['DEFAULT_RESULT_COUNT'],
             default_country=flask_app.config['DEFAULT_COUNTRY_CODE'],
             default_offset=flask_app.config['DEFAULT_RESULT_OFFSET'],
-        ),
-        image_transform=ImageTransformService(
-            replicate_api_token=flask_app.config['REPLICATE_API_TOKEN'],
-            replicate_model=flask_app.config['REPLICATE_MODEL'],
-            transform_prompt=flask_app.config['IMAGE_TRANSFORM_PROMPT'],
         ),
         gpx_processing=GPXProcessingService(),
         deployment=DeploymentService(
@@ -133,12 +126,6 @@ def create_app(config_name=None):
 
     flask_app.services = _build_services(flask_app)
 
-    if not flask_app.config['REPLICATE_API_TOKEN']:
-        flask_app.logger.warning(
-            "REPLICATE_API_TOKEN not configured. "
-            "Image transformation will be disabled."
-        )
-
     # Pillow 12 lazy-loads its plugin registry. Prime it before logging
     # so the log line reflects the actual list of decoders rather than
     # an empty dict. Idempotent — safe to call from multiple factory
@@ -160,7 +147,6 @@ app, limiter, csrf = create_app()
 # reach for ``their_app.services`` directly instead of these globals.
 uitslagen_service = app.services.uitslagen
 sporthive_service = app.services.sporthive
-image_transform_service = app.services.image_transform
 gpx_processing_service = app.services.gpx_processing
 deployment_service = app.services.deployment
 pdf_export_service = app.services.pdf_export
@@ -176,8 +162,27 @@ def get_sporthive_results(name: str, year: int = None) -> list:
 
 @app.route('/')
 @log_request_metrics
-def index():
-    """Renders the homepage with the name input form."""
+def gpx_map():
+    """Renders the GPX upload / route viewer (main page)."""
+    mapbox_token = app.config['MAPBOX_ACCESS_TOKEN']
+    if not mapbox_token:
+        raise APIError("Mapbox access token not configured", "Configuration", 500)
+    return render_template('gpx.html', config={
+        'MAPBOX_ACCESS_TOKEN': mapbox_token
+    })
+
+
+@app.route('/gpx')
+@log_request_metrics
+def gpx_legacy_redirect():
+    """Redirect legacy ``/gpx`` links to the main page."""
+    return redirect(url_for('gpx_map'), code=301)
+
+
+@app.route('/results')
+@log_request_metrics
+def race_results():
+    """Renders the race results search form."""
     return render_template('index.html')
 
 @app.route('/search')
@@ -256,17 +261,6 @@ def _fetch_service_results(service_call, source_name: str, api_errors: list) -> 
         app.logger.warning(f"{source_name} API failed: {e.message}")
         api_errors.append(f"{source_name}: {e.message}")
         return []
-
-@app.route('/gpx')
-@log_request_metrics
-def gpx_upload():
-    """Renders the GPX upload page."""
-    mapbox_token = app.config['MAPBOX_ACCESS_TOKEN']
-    if not mapbox_token:
-        raise APIError("Mapbox access token not configured", "Configuration", 500)
-    return render_template('gpx.html', config={
-        'MAPBOX_ACCESS_TOKEN': mapbox_token
-    })
 
 # Cap the SVG payload at ~32 MB even though Flask's MAX_CONTENT_LENGTH is
 # 16 MB by default — the gpx route's exporter usually produces 4–6 MB but
@@ -504,44 +498,6 @@ def github_webhook():
         app.logger.exception("Webhook processing failed")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/image-transform')
-@log_request_metrics
-def image_transform():
-    """Renders the image transformation page."""
-    if not image_transform_service.is_available():
-        raise APIError("Image transformation service not configured", "Configuration", 503)
-    return render_template('image_transform.html')
-
-@app.route('/transform-image', methods=['POST'])
-@limiter.limit(app.config['UPLOAD_RATE_LIMIT'])
-@log_request_metrics
-def transform_image():
-    """Handles image upload and transformation."""
-    try:
-        if 'file' not in request.files:
-            raise FileUploadError('No file uploaded')
-
-        file = request.files['file']
-        if file.filename == '':
-            raise FileUploadError('No file selected')
-
-        # Read the file content
-        file_content = file.read()
-
-        # Use the image transformation service to process the upload
-        transform_result = image_transform_service.process_image_upload(
-            filename=file.filename,
-            content_type=file.content_type,
-            file_content=file_content
-        )
-
-        return jsonify(transform_result)
-
-    except Exception as e:
-        app.logger.error(f"Error in image transformation: {str(e)}")
-        # Return JSON error instead of letting Flask return HTML error page
-        return jsonify({'error': f'Image transformation failed: {str(e)}'}), 500
-
 @app.route('/health')
 @log_request_metrics
 def health_check():
@@ -576,12 +532,6 @@ def detailed_health_check():
             'author': git_info.get('author')
         },
         'services': {}
-    }
-
-    # Check Replicate API (via image transform service)
-    health_status['services']['replicate'] = {
-        'configured': image_transform_service.is_available(),
-        'status': 'available' if image_transform_service.is_available() else 'unavailable'
     }
 
     # Check Mapbox

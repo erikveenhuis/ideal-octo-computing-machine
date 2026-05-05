@@ -19,13 +19,6 @@ deployment_service = DeploymentService()
 result = deployment_service.start_deployment(github_payload)
 ```
 
-### ImageTransformService (`image_transform_service.py`)
-Handles image processing and transformation using Replicate API:
-- File validation (size, type, dimensions)
-- Image preprocessing and optimization
-- Background removal via AI model
-- Comprehensive error handling
-
 ### GPXProcessingService (`gpx_processing_service.py`)
 Processes GPX files for route visualization:
 - GPX file parsing and validation

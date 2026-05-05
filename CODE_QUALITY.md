@@ -8,7 +8,7 @@ The codebase is held to:
 
 - **Pylint score**: minimum 9.0/10.0 (CI hard fail). Production code currently
   scores ~9.99/10.
-- **Pytest**: ~300 tests, ~92% line coverage. Both CI and the default
+- **Pytest**: ~280 tests, ~94% line coverage. Both CI and the default
   `pytest` invocation (via `pytest.ini` `addopts`) enforce
   `--cov-fail-under=80` once `pytest-cov` is installed from
   `requirements-dev.txt`.
@@ -68,7 +68,8 @@ The configuration is tuned for this Flask application:
   `broad-exception-caught` (acceptable at API boundary),
   `trailing-whitespace` and `line-too-long` (handled by Black + editor).
 - **Limits**: `max-line-length=100`, `max-args=7`, `max-locals=20`,
-  `max-module-lines=1000`, minimum score 8.0/10.
+  `max-module-lines=1100` (see comment in `.pylintrc` for why it is above
+  the default 1000), minimum score **9.0**/10 (`--fail-under=9.0` in CI).
 
 ### CI (`.github/workflows/pylint.yml`)
 
@@ -133,13 +134,15 @@ so unjustified `disable=` lines slip through silently otherwise.
 
 ## Quality Metrics (snapshot)
 
-- **Pylint score**: ~9.9/10 (production code)
-- **Files analysed by pylint**: 12 production modules
-- **Pytest tests**: ~300, all green
-- **Coverage**: ~92% line coverage, gated at 80%
+- **Pylint score**: 10.00/10 (production code, `--fail-under=9.0`)
+- **Files analysed by pylint**: ~14 Python modules (app + config + handlers
+  + `utils/*` + `services/*`)
+- **Pytest tests**: ~280, all green
+- **Coverage**: ~94% line coverage, gated at 80%
 - **JS tests**: 32, all green
 
 ## Future Improvements
 
-Tracked separately in GitHub Issues. The long-running historical wishlist
-under [`docs/history/`](docs/history/) is no longer the source of truth.
+Tracked separately in GitHub Issues. Completed sprint checklists or legacy
+planning notes can live under [`docs/history/`](docs/history/) so the repo
+root stays tidy.

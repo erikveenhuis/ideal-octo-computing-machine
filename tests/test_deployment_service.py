@@ -241,7 +241,8 @@ class TestGetPipExecutable:
 
 
 class TestReloadApplication:
-    def test_no_op_when_not_configured(self, service, mocker):
+    def test_no_op_when_not_configured(self, service, mocker, monkeypatch):
+        monkeypatch.setattr(os.path, "exists", lambda p: False)
         run_mock = mocker.patch("services.deployment_service.subprocess.run")
         service._reload_application()
         run_mock.assert_not_called()
@@ -290,3 +291,26 @@ class TestReloadApplication:
         )
         with pytest.raises(ServiceRestartError):
             configured_service._reload_application()
+
+    def test_touches_inferred_pythonanywhere_wsgi(
+        self, service, monkeypatch, mocker
+    ):
+        """Unset WSGI path: infer ``/var/www/<user>_pythonanywhere_com_wsgi.py``."""
+        pa_wsgi = "/var/www/acme_pythonanywhere_com_wsgi.py"
+        monkeypatch.setattr(os.path, "expanduser", lambda _: "/home/acme")
+
+        def _exists(p):
+            return str(p) == pa_wsgi
+
+        monkeypatch.setattr(os.path, "exists", _exists)
+        mocker.patch("services.deployment_service.time.sleep")
+        run_mock = mocker.patch(
+            "services.deployment_service.subprocess.run",
+            return_value=_completed_process(),
+        )
+
+        service._reload_application()
+
+        assert run_mock.call_count == 2
+        for call in run_mock.call_args_list:
+            assert call.args[0] == ["touch", pa_wsgi]
