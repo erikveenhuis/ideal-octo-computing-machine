@@ -116,8 +116,7 @@ exporter relies on.
   <g id="Thrucut" data-cut-type="thrucut"
      transform="translate(0,0) scale(1.22074, 1.21346)">
     <path class="st6"
-          d="M554.2,27.3 h113.4 v850.4
-             M667.6,877.7 V27.3 H554.2 v0
+          d="M667.6,877.7 V27.3 H554.2 v0
              c0,3.3 -2.7,6 -6,6 H446.9
              c-3.3,0 -6,-2.7 -6,-6 v0
              H29.3 v850.4 H667.6 z" />
