@@ -19,6 +19,7 @@ the real-world export at ``tests/files/gpx-route-2026-04-29-vector.svg``
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pymupdf
@@ -809,3 +810,248 @@ def test_set_page_trimbox_rejects_invalid_geometry():
         _set_page_trimbox_mm(base, page_index=0, trim_mm=(50, 50, 10, 90))
     with pytest.raises(PDFExportError):
         _set_page_trimbox_mm(base, page_index=0, trim_mm=(10, 50, 50, 20))
+
+
+# ---------------------------------------------------------------------------
+# Per-paint RGB → CMYK repaint
+# ---------------------------------------------------------------------------
+#
+# Both pipelines repaint every DeviceRGB Color on the visible-art
+# Drawing(s) to a DeviceCMYK CMYKColor before render so the resulting
+# PDF emits ``c m y k k`` / ``c m y k K`` ops rather than
+# ``r g b rg`` / ``r g b RG`` ops. Without this pass, press RIPs use
+# their own default sRGB→CMYK profile (which differs between vendors)
+# and the same file then prints differently at two shops.
+#
+# The tests below pin three guarantees:
+#   1. The textbook GCR formula maps the canonical extremes correctly.
+#   2. The walker leaves Separation / existing CMYK / None paints alone
+#      (so the Thrucut and White plates can't be flattened to process).
+#   3. End-to-end through ``build_pdf`` the merged PDF carries no
+#      DeviceRGB content ops on the visible-art Form XObject.
+
+def test_rgb_to_cmyk_canonical_extremes():
+    """Spot-check the GCR mapping on the points where any breakage
+    would silently corrupt every output: pure black/white and the three
+    primaries, plus a 50% grey to confirm K-only collapse.
+    """
+    from services.pdf_export_service import _rgb_to_cmyk
+
+    assert _rgb_to_cmyk(0.0, 0.0, 0.0) == (0.0, 0.0, 0.0, 1.0)
+    assert _rgb_to_cmyk(1.0, 1.0, 1.0) == (0.0, 0.0, 0.0, 0.0)
+    assert _rgb_to_cmyk(1.0, 0.0, 0.0) == (0.0, 1.0, 1.0, 0.0)
+    assert _rgb_to_cmyk(0.0, 1.0, 0.0) == (1.0, 0.0, 1.0, 0.0)
+    assert _rgb_to_cmyk(0.0, 0.0, 1.0) == (1.0, 1.0, 0.0, 0.0)
+
+    c, m, y, k = _rgb_to_cmyk(0.5, 0.5, 0.5)
+    assert (c, m, y) == (0.0, 0.0, 0.0), (
+        "neutral grey must collapse to K-only or text registration breaks"
+    )
+    assert abs(k - 0.5) < 1e-9
+
+
+def test_rgb_to_cmyk_clamps_out_of_range_input():
+    """Out-of-gamut floats from svglib (negative / >1, occasionally
+    seen on filtered fills) must clamp instead of producing NaN/inf —
+    a CMYKColor with a NaN component would crash ReportLab at render.
+    """
+    from services.pdf_export_service import _rgb_to_cmyk
+
+    assert _rgb_to_cmyk(-0.5, 2.0, 0.5) == _rgb_to_cmyk(0.0, 1.0, 0.5)
+
+
+def test_color_to_cmyk_preserves_spot_and_cmyk_paints():
+    """``_color_to_cmyk`` must short-circuit on Separation paints (so
+    Thrucut / White stay spot) and on existing CMYKColor instances,
+    return ``None`` unchanged, and only convert plain ``Color``
+    (DeviceRGB) instances.
+    """
+    from reportlab.lib.colors import CMYKColor, Color, PCMYKColorSep
+    from services.pdf_export_service import (
+        _color_to_cmyk,
+        THRUCUT_SPOT_CMYK,
+        THRUCUT_SPOT_NAME,
+    )
+
+    spot = PCMYKColorSep(
+        *THRUCUT_SPOT_CMYK, spotName=THRUCUT_SPOT_NAME, density=100,
+    )
+    assert _color_to_cmyk(spot) is spot, (
+        "Separation spot must NOT be flattened to process CMYK; "
+        "the cutter / White plate would lose its plate identity"
+    )
+
+    cmyk = CMYKColor(0.1, 0.2, 0.3, 0.4)
+    assert _color_to_cmyk(cmyk) is cmyk, (
+        "an already-CMYK paint must pass through unchanged so the "
+        "walker is idempotent"
+    )
+
+    assert _color_to_cmyk(None) is None, (
+        "None paint must stay None — a stroke-only path must not gain "
+        "a fill on conversion"
+    )
+
+    rgb = Color(1.0, 0.0, 0.0, alpha=0.5)
+    out = _color_to_cmyk(rgb)
+    assert isinstance(out, CMYKColor) and not isinstance(out, PCMYKColorSep)
+    assert (out.cyan, out.magenta, out.yellow, out.black) == (0.0, 1.0, 1.0, 0.0)
+    assert out.alpha == 0.5, "alpha must survive the conversion"
+
+
+def test_convert_rgb_to_cmyk_recursive_walks_nested_tree():
+    """The walker must visit every nested drawable, repaint its RGB
+    sides to CMYK, leave spot / None paints alone, and not introduce
+    paint where there was none. Mirrors the structure svglib emits for
+    a real SVG (Drawing → Group → Path).
+    """
+    from reportlab.graphics.shapes import Drawing, Group, Path
+    from reportlab.lib.colors import CMYKColor, Color, PCMYKColorSep
+    from services.pdf_export_service import (
+        _convert_rgb_to_cmyk_recursive,
+        THRUCUT_SPOT_CMYK,
+        THRUCUT_SPOT_NAME,
+    )
+
+    rgb_path = Path()
+    rgb_path.strokeColor = Color(1.0, 0.0, 0.0)
+    rgb_path.fillColor = Color(0.0, 1.0, 0.0)
+
+    spot = PCMYKColorSep(
+        *THRUCUT_SPOT_CMYK, spotName=THRUCUT_SPOT_NAME, density=100,
+    )
+    spot_path = Path()
+    spot_path.strokeColor = spot
+    spot_path.fillColor = None
+
+    no_paint = Path()
+    no_paint.strokeColor = None
+    no_paint.fillColor = None
+
+    inner = Group()
+    inner.add(rgb_path)
+    inner.add(spot_path)
+    inner.add(no_paint)
+    drawing = Drawing(100, 100)
+    drawing.add(inner)
+
+    _convert_rgb_to_cmyk_recursive(drawing)
+
+    # RGB paint was converted to CMYK on both sides.
+    assert isinstance(rgb_path.strokeColor, CMYKColor)
+    assert isinstance(rgb_path.fillColor, CMYKColor)
+    s = rgb_path.strokeColor
+    f = rgb_path.fillColor
+    assert (s.cyan, s.magenta, s.yellow, s.black) == (0.0, 1.0, 1.0, 0.0)
+    assert (f.cyan, f.magenta, f.yellow, f.black) == (1.0, 0.0, 1.0, 0.0)
+
+    # Spot path survives — the cut / White plate is sacred.
+    assert spot_path.strokeColor is spot
+    assert spot_path.fillColor is None
+
+    # No-paint path stays no-paint — we don't fabricate strokes/fills.
+    assert no_paint.strokeColor is None
+    assert no_paint.fillColor is None
+
+
+def _iter_paint_streams(doc) -> "list[bytes]":
+    """Return the decompressed bytes of every paint-bearing stream in
+    ``doc``: the page's /Contents stream(s) plus every Form XObject
+    referenced anywhere (which is where ``show_pdf_page`` parks
+    imported plates). Mirrors the helper in
+    ``tests/test_plexiglas_black_style.py`` so this test sees the same
+    surface area: a regression that ships RGB ops inside a nested
+    XObject can't hide.
+    """
+    out: list[bytes] = []
+    for xref in range(1, doc.xref_length()):
+        try:
+            obj = doc.xref_object(xref) or ""
+        except Exception:
+            continue
+        if "/Subtype /Form" not in obj:
+            continue
+        try:
+            data = doc.xref_stream(xref)
+        except Exception:
+            continue
+        if data:
+            out.append(data)
+    for page in doc:
+        try:
+            out.append(page.read_contents())
+        except Exception:
+            continue
+    return out
+
+
+# Match a DeviceRGB paint operator: three numeric operands followed by
+# ``rg`` (fill) or ``RG`` (stroke), with PDF token boundaries on both
+# sides so ``Wrg`` inside a font name or ``Trg`` inside an op name
+# doesn't trigger.
+_DEVICE_RGB_OP_RE = re.compile(
+    rb"(?:^|[\s\(\)\[\]\<\>])"
+    rb"-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+-?\d+(?:\.\d+)?\s+(rg|RG)"
+    rb"(?=[\s\(\)\[\]\<\>])"
+)
+
+
+def test_build_pdf_forex_emits_no_devicergb_ops(export_service):
+    """End-to-end: after the per-paint repaint, the merged forex PDF
+    must contain zero DeviceRGB content operators. Every visible-art
+    paint must come through as ``c m y k k`` / ``c m y k K`` (process
+    CMYK) or via the Thrucut spot. This is the production-facing
+    contract: a regression that drops the repaint will reintroduce
+    RIP-default-dependent colour conversion.
+    """
+    result = export_service.build_pdf(ExportRequest(
+        svg_text=_SYNTHETIC_SVG, page_mm=PAGE_TARGET_MM,
+    ))
+    doc = pymupdf.open(stream=result.pdf_bytes, filetype="pdf")
+    try:
+        offending: list[bytes] = []
+        for stream in _iter_paint_streams(doc):
+            offending.extend(
+                m.group(0).strip() for m in _DEVICE_RGB_OP_RE.finditer(stream)
+            )
+    finally:
+        doc.close()
+
+    assert not offending, (
+        f"forex PDF still contains {len(offending)} DeviceRGB op(s); "
+        f"first few: {offending[:5]}"
+    )
+
+
+def test_build_pdf_plexiglas_black_overlay_has_no_devicergb_ops(export_service):
+    """End-to-end: the Plexi Black PDF must also be DeviceRGB-free.
+    The basemap is on /Separation /White (already CMYK-defined alt),
+    the cut layer on /Separation /Thrucut, and the previously-RGB
+    overlay (Route / Markers / Overlay / Tekst_laag) is now repainted
+    to DeviceCMYK before render. Therefore zero ``rg`` / ``RG`` ops
+    must appear anywhere in the merged PDF's paint streams.
+    """
+    from services.pdf_export_service import (
+        PLEXI_PAGE_MM,
+        STYLE_PLEXIGLAS_BLACK,
+    )
+
+    result = export_service.build_pdf(ExportRequest(
+        svg_text=_SYNTHETIC_SVG,
+        page_mm=PLEXI_PAGE_MM,
+        style=STYLE_PLEXIGLAS_BLACK,
+    ))
+    doc = pymupdf.open(stream=result.pdf_bytes, filetype="pdf")
+    try:
+        offending: list[bytes] = []
+        for stream in _iter_paint_streams(doc):
+            offending.extend(
+                m.group(0).strip() for m in _DEVICE_RGB_OP_RE.finditer(stream)
+            )
+    finally:
+        doc.close()
+
+    assert not offending, (
+        f"plexi PDF still contains {len(offending)} DeviceRGB op(s); "
+        f"first few: {offending[:5]}"
+    )

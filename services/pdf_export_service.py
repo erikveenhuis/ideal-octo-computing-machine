@@ -39,12 +39,13 @@ from __future__ import annotations
 import copy
 import io
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from lxml import etree
 from reportlab.graphics import renderPDF
-from reportlab.lib.colors import PCMYKColorSep
+from reportlab.lib.colors import CMYKColor, Color, PCMYKColorSep
 from svglib.svglib import svg2rlg
 
 
@@ -269,8 +270,25 @@ class PDFExportService:
         # background, and conflating both would make a future regression
         # in either harder to localise.
         if req.style == STYLE_PLEXIGLAS_BLACK:
-            return self._build_plexiglas_black(req, prep)
-        return self._build_forex(req, prep)
+            result = self._build_plexiglas_black(req, prep)
+        else:
+            result = self._build_forex(req, prep)
+
+        # Final pass: scrub ReportLab's hardcoded DeviceRGB default-
+        # state ops (``0 0 0 RG`` / ``0 0 0 rg``) on every Form XObject
+        # and page content stream. Combined with
+        # ``_convert_rgb_to_cmyk_recursive``, this guarantees the
+        # rendered PDF carries zero DeviceRGB content operators —
+        # every visible-art paint is DeviceCMYK or a Separation spot.
+        # See ``_scrub_reportlab_rgb_defaults`` for why the per-paint
+        # walker alone isn't sufficient.
+        return ExportResult(
+            pdf_bytes=_scrub_reportlab_rgb_defaults(result.pdf_bytes),
+            page_size_mm=result.page_size_mm,
+            thrucut_size_mm=result.thrucut_size_mm,
+            style=result.style,
+            trim_box_mm=result.trim_box_mm,
+        )
 
     # ---------------------------------------------------------------
     # Shared preparation: parse SVG, split off Thrucut, render via svglib
@@ -413,6 +431,17 @@ class PDFExportService:
     # ---------------------------------------------------------------
 
     def _build_forex(self, req: ExportRequest, prep: dict) -> ExportResult:
+        # Repaint every DeviceRGB stroke/fill on the visible-art tree to
+        # a DeviceCMYK equivalent BEFORE render so the resulting PDF
+        # emits only ``c m y k k`` / ``c m y k K`` ops (plus the spot
+        # colour ops on the Thrucut plate). Without this pass the press
+        # RIP would convert SVG ``#abc`` / ``#000`` / ``#fff`` paints
+        # using its own default sRGB→CMYK profile, which differs by
+        # vendor — the same file then prints differently at two shops.
+        # See ``_convert_rgb_to_cmyk_recursive`` for the CMYK / spot
+        # short-circuit guarantees.
+        _convert_rgb_to_cmyk_recursive(prep["art_drawing"])
+
         # Render the art and thrucut PDFs at the SAME page size and with
         # the SAME canvas CTM, so their content stacks correctly when
         # PyMuPDF stamps one onto the other.
@@ -469,6 +498,16 @@ class PDFExportService:
         )
         rgb_overlay_pdf: Optional[bytes] = None
         if prep["rgb_overlay_drawing"] is not None:
+            # Repaint the RGB overlay tree (Route, Markers, Overlay,
+            # Tekst_laag) to DeviceCMYK before render. The basemap tree
+            # was already routed through ``_set_white_spot_recursive``
+            # above, so this pass leaves the White plate untouched and
+            # only scrubs DeviceRGB ops from the overlay plate. The
+            # variable name "rgb_overlay" is kept for continuity with
+            # the SVG-side split (those layers carry RGB *colours* in
+            # the source SVG); after this pass the rendered PDF carries
+            # DeviceCMYK ops, not DeviceRGB.
+            _convert_rgb_to_cmyk_recursive(prep["rgb_overlay_drawing"])
             rgb_overlay_pdf = _render_drawing_to_pdf(
                 prep["rgb_overlay_drawing"],
                 prep["page_w_pt"], prep["page_h_pt"],
@@ -852,6 +891,118 @@ def _set_white_spot_recursive(node, spot_color: PCMYKColorSep) -> None:
             _set_white_spot_recursive(child, spot_color)
 
 
+def _rgb_to_cmyk(
+    r: float, g: float, b: float
+) -> Tuple[float, float, float, float]:
+    """Convert an sRGB triple in ``[0, 1]`` to a DeviceCMYK quadruple
+    in ``[0, 1]`` using the textbook GCR formula:
+
+        K = 1 - max(R, G, B)
+        C = (1 - R - K) / (1 - K)
+        M = (1 - G - K) / (1 - K)
+        Y = (1 - B - K) / (1 - K)
+
+    With degenerate guards for pure white (K == 0, all process inks 0)
+    and pure black (K == 1, all process inks 0). The mapping has two
+    properties that matter for this product:
+
+      - Pure greys collapse to K-only (e.g. ``rgb(0.5, 0.5, 0.5)`` →
+        ``cmyk(0, 0, 0, 0.5)``). That mirrors what every modern RIP
+        does for greyscale text on a CMYK plate and avoids the
+        registration-sensitive "rich black" that you get if the same
+        grey is converted to ``(0.5, 0.5, 0.5, 0)``.
+      - Saturated primaries map to the conventional secondary pairs:
+        ``rgb(1,0,0)`` → ``cmyk(0,1,1,0)`` (M+Y), ``rgb(0,1,0)`` →
+        ``cmyk(1,0,1,0)`` (C+Y), ``rgb(0,0,1)`` → ``cmyk(1,1,0,0)``
+        (C+M). The output is a deterministic, profile-free baseline so
+        every press RIP sees the same DeviceCMYK ops regardless of its
+        default sRGB→CMYK behaviour.
+
+    NOT an ICC-aware conversion: for colour-critical work the printed
+    file should additionally carry a CMYK ``OutputIntent`` (e.g.
+    FOGRA39) so the press converts using the shop's preferred profile.
+    This formula's job is just to scrub every ``r g b rg`` /
+    ``r g b RG`` op from the rendered PDF in favour of ``c m y k k`` /
+    ``c m y k K`` so the result no longer depends on the RIP's
+    DeviceRGB default.
+    """
+    r = max(0.0, min(1.0, r))
+    g = max(0.0, min(1.0, g))
+    b = max(0.0, min(1.0, b))
+    k = 1.0 - max(r, g, b)
+    if k >= 1.0 - 1e-9:
+        return (0.0, 0.0, 0.0, 1.0)
+    inv = 1.0 / (1.0 - k)
+    c = (1.0 - r - k) * inv
+    m = (1.0 - g - k) * inv
+    y = (1.0 - b - k) * inv
+    return (c, m, y, k)
+
+
+def _color_to_cmyk(color):
+    """Return a CMYK equivalent of ``color`` if it is a DeviceRGB
+    ``Color``; otherwise return it unchanged.
+
+    The decision tree is:
+
+      - ``None`` → ``None`` (path had no paint on that side; preserve it
+        so a stroke-only road line doesn't gain a fill on conversion).
+      - already a ``CMYKColor`` (or subclass — ``PCMYKColor``,
+        ``PCMYKColorSep``) → returned untouched. This is what protects
+        every spot-colour paint (Thrucut, White) from being flattened
+        to process inks: ``PCMYKColorSep`` extends ``CMYKColor`` and
+        ``isinstance`` short-circuits before the RGB branch.
+      - ``Color`` → mapped through :func:`_rgb_to_cmyk`. The original
+        alpha is preserved on the new ``CMYKColor`` so semi-transparent
+        SVG paints survive the conversion (svglib emits these for
+        e.g. halo filters resolved to a flat fill).
+      - anything else (gradients, custom shading, future ReportLab
+        types) → returned unchanged. We don't synthesise a CMYK
+        equivalent for fills we don't recognise; the safest behaviour
+        is to leave them alone and let ReportLab's renderer decide.
+    """
+    if color is None:
+        return None
+    if isinstance(color, CMYKColor):
+        return color
+    if isinstance(color, Color):
+        c, m, y, k = _rgb_to_cmyk(color.red, color.green, color.blue)
+        return CMYKColor(c, m, y, k, alpha=color.alpha)
+    return color
+
+
+def _convert_rgb_to_cmyk_recursive(node) -> None:
+    """Walk ``node`` (a ReportLab ``Drawing`` / ``Group`` / ``Path`` /
+    similar) and replace every DeviceRGB ``strokeColor`` / ``fillColor``
+    with a DeviceCMYK equivalent.
+
+    Spot-colour paints (``PCMYKColorSep``) and existing CMYK paints are
+    left alone (see :func:`_color_to_cmyk`), so this is safe to call on
+    the visible-art Drawing for either pipeline:
+
+      - Forex: the *whole* art tree carries SVG-derived RGB paints.
+        Every one of them gets repainted to DeviceCMYK before render.
+      - Plexi Black: the *RGB overlay* sub-tree (Route / Markers /
+        Overlay / Tekst_laag) carries SVG-derived RGB paints; the
+        basemap sub-tree has already been swapped to ``/Separation
+        /White`` by :func:`_set_white_spot_recursive` and is therefore
+        unaffected by this pass. Calling it on the overlay tree only
+        leaves the White plate untouched.
+
+    The end-state invariant after this pass is: every paint anywhere in
+    the tree is one of ``None``, a ``CMYKColor`` (process), or a
+    ``PCMYKColorSep`` (spot). The PDF written by ReportLab will
+    therefore emit DeviceCMYK / Separation ops only — no DeviceRGB.
+    """
+    if hasattr(node, "strokeColor"):
+        node.strokeColor = _color_to_cmyk(node.strokeColor)
+    if hasattr(node, "fillColor"):
+        node.fillColor = _color_to_cmyk(node.fillColor)
+    if hasattr(node, "contents"):
+        for child in node.contents:
+            _convert_rgb_to_cmyk_recursive(child)
+
+
 def _render_drawing_to_pdf(
     drawing,
     page_w_pt: float,
@@ -1004,6 +1155,114 @@ def _merge_plexi_plates(
             rgb_doc.close()
         white_doc.close()
         out.close()
+
+
+#: Match ReportLab's hardcoded DeviceRGB default-state operators.
+#:
+#: ``renderbase.STATE_DEFAULTS`` carries ``Color(0, 0, 0, 1)`` for
+#: ``strokeColor`` / ``fillColor``, and the ``renderPDF`` backend
+#: emits ``0 0 0 RG`` / ``0 0 0 rg`` at the top of every Drawing
+#: render — even when every actual paint on the Drawing has been
+#: swapped to DeviceCMYK by ``_convert_rgb_to_cmyk_recursive``. Those
+#: default-state ops are inert (the first real paint op overwrites
+#: them before any geometry is stroked or filled), but they leave
+#: DeviceRGB content in the PDF, which press RIPs would otherwise
+#: convert using their own default sRGB→CMYK profile and produce
+#: per-vendor colour shifts.
+#:
+#: We anchor the regex on PDF token boundaries — no preceding digit
+#: or dot, no following alphanumeric — so a coincidental ``0 0 0 RG``
+#: byte sequence inside a font program or coordinate array (e.g.
+#: ``10 0 0 RG``, ``0.0 0 0 RGBalt``) does not get rewritten.
+_REPORTLAB_RGB_DEFAULT_RE = re.compile(
+    rb"(?<![\d.])0 0 0 (RG|rg)(?![A-Za-z0-9])"
+)
+
+
+def _replace_rgb_default(match: "re.Match[bytes]") -> bytes:
+    op = match.group(1)
+    return b"0 0 0 1 K" if op == b"RG" else b"0 0 0 1 k"
+
+
+def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
+    """Rewrite ReportLab's hardcoded ``0 0 0 RG`` / ``0 0 0 rg`` default-
+    state ops to their DeviceCMYK equivalents (``0 0 0 1 K`` /
+    ``0 0 0 1 k``) on every paint-bearing stream in ``pdf_bytes``.
+
+    ``Color(0, 0, 0, 1)`` and ``CMYKColor(0, 0, 0, 1)`` both render as
+    pure black, so the rewrite does not change visible output. The pass
+    only inspects:
+
+      - Form XObjects (``/Subtype /Form``) — that's where
+        ``page.show_pdf_page`` parks every imported plate (Thrucut for
+        forex; White, RGB-overlay, Thrucut for plexi).
+      - Page-level content streams — that's where the *base* PDF for a
+        ``show_pdf_page`` merge keeps its own content; the forex
+        pipeline's art_pdf, for example, ends up at page level after
+        ``art_doc[0].show_pdf_page(thrucut_doc, …)`` because art_doc is
+        the merge target rather than an imported XObject.
+
+    Image / font streams are skipped (they don't carry a
+    ``/Subtype /Form`` and aren't a page's /Contents), so the regex
+    can't accidentally rewrite a byte sequence inside a JPEG or a
+    Type1 font program.
+
+    Stream length is updated automatically by PyMuPDF's
+    ``update_stream``; callers don't need to recompute /Length.
+    """
+    pymupdf = _get_pymupdf()
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        rewrote = False
+
+        # Form XObjects: imported plates from show_pdf_page.
+        for xref in range(1, doc.xref_length()):
+            try:
+                obj = doc.xref_object(xref) or ""
+            except Exception:
+                continue
+            if "/Subtype /Form" not in obj:
+                continue
+            try:
+                data = doc.xref_stream(xref)
+            except Exception:
+                continue
+            if not data:
+                continue
+            new_data = _REPORTLAB_RGB_DEFAULT_RE.sub(
+                _replace_rgb_default, data
+            )
+            if new_data != data:
+                doc.update_stream(xref, new_data, compress=True)
+                rewrote = True
+
+        # Page-level content streams: the base PDF in a show_pdf_page
+        # merge keeps its content here (e.g. forex art_pdf becomes the
+        # base, so its ReportLab-emitted preamble lives at page level).
+        for page in doc:
+            try:
+                cs_xrefs = page.get_contents()
+            except Exception:
+                continue
+            for xref in cs_xrefs:
+                try:
+                    data = doc.xref_stream(xref)
+                except Exception:
+                    continue
+                if not data:
+                    continue
+                new_data = _REPORTLAB_RGB_DEFAULT_RE.sub(
+                    _replace_rgb_default, data
+                )
+                if new_data != data:
+                    doc.update_stream(xref, new_data, compress=True)
+                    rewrote = True
+
+        if rewrote:
+            return doc.tobytes()
+        return pdf_bytes
+    finally:
+        doc.close()
 
 
 def _set_page_trimbox_mm(
