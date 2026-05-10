@@ -57,17 +57,6 @@ from svglib.svglib import svg2rlg
 #: spot-color plate to within sub-millimetre precision.
 THRUCUT_TARGET_MM: Tuple[float, float] = (225.0, 310.0)
 
-#: Default proportional bleed factor around the Thrucut (6%).
-#: Used by the endpoint to default the page size; the service itself
-#: trusts the ``page_mm`` it receives.
-PAGE_BLEED_FACTOR: float = 0.06
-
-#: Default total page size (Thrucut + bleed) in mm.
-PAGE_TARGET_MM: Tuple[float, float] = (
-    THRUCUT_TARGET_MM[0] * (1.0 + PAGE_BLEED_FACTOR),
-    THRUCUT_TARGET_MM[1] * (1.0 + PAGE_BLEED_FACTOR),
-)
-
 #: Plexiglas Black product page geometry.
 #: Spec from production: page = Thrucut + 10 mm bleed on every side, with
 #: a TrimBox at the Thrucut so press operators can verify cut/bleed. The
@@ -83,6 +72,12 @@ PLEXI_PAGE_MM: Tuple[float, float] = (
     THRUCUT_TARGET_MM[1] + 2.0 * PLEXI_BLEED_MM,
 )
 PLEXI_TRIM_INSET_MM: float = PLEXI_BLEED_MM
+
+#: Default total page size for forex (same media as ``PLEXI_PAGE_MM``: Thrucut
+#: + 10 mm bleed per edge) so forex and Plexiglas Black exports share physical
+#: dimensions in prepress. The endpoint defaults forex to this; the service
+#: trusts the ``page_mm`` it receives.
+PAGE_TARGET_MM: Tuple[float, float] = PLEXI_PAGE_MM
 
 #: Identifier of the spot-color separation. Print operators look for this
 #: exact name to identify the cutter plate.
@@ -169,8 +164,8 @@ class ExportRequest:
 
     ``style`` selects the print-product pipeline:
       - ``"forex"`` (default): single Thrucut spot color, no TrimBox,
-        whatever ``page_mm`` was supplied (typically 238.5 x 328.6 mm
-        with the 6% proportional bleed).
+        whatever ``page_mm`` was supplied (typically 245 x 330 mm,
+        Thrucut + 10 mm bleed, matching Plexiglas Black media size).
       - ``"plexiglas_black"``: two spot colors (Thrucut + White), all
         visible artwork repainted on the White plate, 245 x 330 mm page
         with a TrimBox at the 225 x 310 mm Thrucut and a 10 mm bleed.

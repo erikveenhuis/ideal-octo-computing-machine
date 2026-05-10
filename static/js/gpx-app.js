@@ -892,6 +892,7 @@ class GPXApp {
         // PDF no longer needs Arial installed on the cutter / RIP machine.
         const TITLE_STYLE = (size) => `font-family:'DIN Pro';font-size:${size}px;font-weight:bold;`;
         const DATE_STYLE = "font-family:'DIN Pro';font-size:20px;font-weight:normal;";
+        const STAT_LABEL_STYLE = "font-family:'DIN Pro';font-size:20px;font-weight:normal;";
         const STAT_STYLE = "font-family:'DIN Pro';font-size:24px;font-weight:bold;";
 
         // Title block centered
@@ -904,6 +905,17 @@ class GPXApp {
         svgEl.appendChild(this.createTextElement(doc, centerX, 183.1047, [
             { text: values.date || '', y: 0, style: DATE_STYLE }
         ], 'middle'));
+
+        // Stat row labels (Dutch). Historically these lived in the overlay SVG as
+        // one Illustrator path per glyph, producing separate cut contours per
+        // letter. Emit them as normal <text> so TextOutliner produces one filled
+        // outline per word, matching titles and numeric stats. Baselines and
+        // line gaps follow the original artwork (y0 + 30 / +60 from 704.9).
+        svgEl.appendChild(this.createTextElement(doc, 127, 704.9, [
+            { text: 'Afstand', y: 0, style: STAT_LABEL_STYLE },
+            { text: 'Tijd', y: 30, style: STAT_LABEL_STYLE },
+            { text: 'Tempo', y: 60, style: STAT_LABEL_STYLE },
+        ]));
 
         // Stats block (distance, time, pace)
         svgEl.appendChild(this.createTextElement(doc, 227.8591, 707.8073, [

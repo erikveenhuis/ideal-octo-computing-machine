@@ -47,7 +47,7 @@ _SYNTHETIC_SVG = """\
 """
 
 
-def _payload(svg: str = _SYNTHETIC_SVG, page_mm=(238.5, 328.6)) -> dict:
+def _payload(svg: str = _SYNTHETIC_SVG, page_mm=(245.0, 330.0)) -> dict:
     return {
         "svg": svg,
         "page_mm": {"width": page_mm[0], "height": page_mm[1]},
@@ -69,8 +69,8 @@ def test_export_pdf_returns_pdf_with_thrucut(client):
     height_mm = float(response.headers["X-PDF-Page-Height-mm"])
     thrucut_w = float(response.headers["X-PDF-Thrucut-Width-mm"])
     thrucut_h = float(response.headers["X-PDF-Thrucut-Height-mm"])
-    assert width_mm == pytest.approx(238.5, abs=0.05)
-    assert height_mm == pytest.approx(328.6, abs=0.05)
+    assert width_mm == pytest.approx(245.0, abs=0.05)
+    assert height_mm == pytest.approx(330.0, abs=0.05)
     assert thrucut_w == pytest.approx(225.0, abs=0.05)
     assert thrucut_h == pytest.approx(310.0, abs=0.05)
 
@@ -98,7 +98,7 @@ def test_export_pdf_returns_pdf_with_thrucut(client):
 
 def test_export_pdf_filename_includes_titles_and_dutch_date(client):
     """Optional ``title1`` / ``title2`` / ``event_date`` drive the download
-    name: ``YYYYMMDD`` prefix, Dutch long date, then title parts."""
+    name: ``YYYYMMDD`` prefix, title parts, then Dutch long date."""
     response = client.post(
         "/export-pdf",
         json={
@@ -140,7 +140,7 @@ def test_export_pdf_rejects_non_json_body(client):
 
 
 def test_export_pdf_rejects_missing_svg(client):
-    response = client.post("/export-pdf", json={"page_mm": {"width": 238.5, "height": 328.6}})
+    response = client.post("/export-pdf", json={"page_mm": {"width": 245.0, "height": 330.0}})
     assert response.status_code in (400, 422)
     body = response.get_json()
     assert body and "svg" in body.get("error", "").lower()
@@ -188,11 +188,12 @@ def test_export_pdf_rejects_oversized_page_mm(client):
 
 def test_export_pdf_uses_default_page_when_omitted(client):
     """Sending only ``svg`` (no ``page_mm``) defaults to the canonical
-    Thrucut + 6 % bleed so quick checks from a curl prompt don't have to
+    Thrucut + 10 mm bleed (245 x 330 mm) so curl smoke tests don't have to
     repeat the geometry."""
     response = client.post("/export-pdf", json={"svg": _SYNTHETIC_SVG})
     assert response.status_code == 200, response.get_data(as_text=True)
-    assert response.headers["X-PDF-Page-Width-mm"] == "238.50"
+    assert response.headers["X-PDF-Page-Width-mm"] == "245.00"
+    assert response.headers["X-PDF-Page-Height-mm"] == "330.00"
 
 
 @pytest.mark.skipif(not REAL_FIXTURE.exists(),
@@ -223,13 +224,13 @@ def test_export_pdf_real_fixture_round_trip(client):
 # JSON 400 so a typo in the front-end can't leak through to the cutter.
 
 def test_export_pdf_default_style_is_forex(client):
-    """Omitting ``style`` falls back to forex behaviour: 238.5 x 328.6
-    mm page, no /Separation /White, no TrimBox header."""
+    """Omitting ``style`` falls back to forex behaviour: 245 x 330 mm page
+    (same media as plexiglas_black), no /Separation /White, no TrimBox header."""
     response = client.post("/export-pdf", json={"svg": _SYNTHETIC_SVG})
     assert response.status_code == 200
     assert response.headers["X-PDF-Style"] == "forex"
-    assert response.headers["X-PDF-Page-Width-mm"] == "238.50"
-    assert response.headers["X-PDF-Page-Height-mm"] == "328.60"
+    assert response.headers["X-PDF-Page-Width-mm"] == "245.00"
+    assert response.headers["X-PDF-Page-Height-mm"] == "330.00"
     # Forex never writes a TrimBox, so the trim headers must not be set.
     assert "X-PDF-Trim-Width-mm" not in response.headers
     assert "X-PDF-Trim-Height-mm" not in response.headers
@@ -281,9 +282,8 @@ def test_export_pdf_plexiglas_black_round_trip(client):
 
 def test_export_pdf_plexiglas_black_default_page_when_omitted(client):
     """When style=plexiglas_black is given without page_mm, the
-    endpoint must default to the plexi spec (245x330 mm), NOT to the
-    forex 238.5x328.6 mm. This catches the common mistake of letting
-    the wrong default leak across styles."""
+    endpoint must default to the plexi spec (245x330 mm). Forex uses
+    the same default media size; this test guards the plexi style path."""
     response = client.post(
         "/export-pdf",
         json={"svg": _SYNTHETIC_SVG, "style": "plexiglas_black"},

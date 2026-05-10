@@ -13,10 +13,8 @@
     }
     .map-wrapper {
         /*
-         * Match the PDF page aspect (Thrucut 225x310 mm + ~6% proportional
-         * bleed = 238.5x328.6 mm). Both dimensions scale by the same factor,
-         * so the on-screen canvas is a 1:1 preview of the export — including
-         * the small bleed visible around the cut line.
+         * Match the Thrucut aspect (225x310 mm). PDF media is 245x330 mm
+         * (10 mm bleed per edge) for both forex and plexiglas_black exports.
          */
         aspect-ratio: 225 / 310;
         /* Container is 854px to account for 2px border on each side (854-4=850px internal). */

@@ -127,7 +127,7 @@ function wrapSvg(...children) {
 // ---------------------------------------------------------------------------
 
 test('outlines all <text>/<tspan> nodes for the production overlay shape', async () => {
-    // Mirrors the gpx-app overlay block: titles + date + stats.
+    // Mirrors the gpx-app overlay block: titles + date + stat labels + stats.
     const titles = makeOverlayText({
         x: 425, y: 120, anchor: 'middle',
         lines: [
@@ -144,6 +144,17 @@ test('outlines all <text>/<tspan> nodes for the production overlay shape', async
               style: "font-family:'DIN Pro';font-size:20px;font-weight:normal;" },
         ],
     });
+    const statLabels = makeOverlayText({
+        x: 127, y: 704.9,
+        lines: [
+            { text: 'Afstand', y: 0,
+              style: "font-family:'DIN Pro';font-size:20px;font-weight:normal;" },
+            { text: 'Tijd', y: 30,
+              style: "font-family:'DIN Pro';font-size:20px;font-weight:normal;" },
+            { text: 'Tempo', y: 60,
+              style: "font-family:'DIN Pro';font-size:20px;font-weight:normal;" },
+        ],
+    });
     const stats = makeOverlayText({
         x: 227, y: 707,
         lines: [
@@ -155,12 +166,12 @@ test('outlines all <text>/<tspan> nodes for the production overlay shape', async
               style: "font-family:'DIN Pro';font-size:24px;font-weight:bold;" },
         ],
     });
-    const svg = wrapSvg(titles, date, stats);
+    const svg = wrapSvg(titles, date, statLabels, stats);
 
     const replaced = await TextOutliner.outlineSvgTextNodes(svg);
 
-    // Exactly 3 <text> nodes coming in -> 3 replacements.
-    assert.equal(replaced, 3, `expected 3 outlined text nodes, got ${replaced}`);
+    // Exactly 4 <text> nodes coming in -> 4 replacements.
+    assert.equal(replaced, 4, `expected 4 outlined text nodes, got ${replaced}`);
 
     // Print contract: zero live text in the resulting SVG. This is the
     // primary guarantee that gates the plexi PDF — a single surviving
@@ -176,15 +187,15 @@ test('outlines all <text>/<tspan> nodes for the production overlay shape', async
 
     // Each outlined run becomes a <g class="text-outline"> with one
     // <path> per glyph-run. The total path count must match the number
-    // of input runs that had text content (titles=2 + date=1 + stats=3 = 6).
+    // of input runs that had text content (titles=2 + date=1 + labels=3 + stats=3 = 9).
     const wrappers = Array.from(svg.querySelectorAll('g.text-outline'));
-    assert.equal(wrappers.length, 3, 'expected one wrapper per <text>');
+    assert.equal(wrappers.length, 4, 'expected one wrapper per <text>');
     let totalPaths = 0;
     for (const w of wrappers) {
         totalPaths += w.querySelectorAll('path').length;
     }
-    assert.equal(totalPaths, 6,
-        `expected 6 glyph paths (one per text run), got ${totalPaths}`);
+    assert.equal(totalPaths, 9,
+        `expected 9 glyph paths (one per text run), got ${totalPaths}`);
 });
 
 

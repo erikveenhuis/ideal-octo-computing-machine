@@ -44,7 +44,6 @@ from services.pdf_export_service import (
     PAGE_TARGET_MM,
     PDFExportError,
     PDFExportService,
-    PLEXI_PAGE_MM,
     STYLE_FOREX,
     STYLE_PLEXIGLAS_BLACK,
 )
@@ -344,11 +343,12 @@ def _build_export_pdf_filename(
     human_nl = _dutch_long_date(use_date)
     s1 = _sanitize_pdf_filename_piece(title1)
     s2 = _sanitize_pdf_filename_piece(title2)
-    pieces = [sortable, human_nl]
+    pieces = [sortable]
     if s1:
         pieces.append(s1)
     if s2:
         pieces.append(s2)
+    pieces.append(human_nl)
     stem = " ".join(pieces)
     stem = stem[:_EXPORT_FILENAME_MAX_STEM].rstrip()
     if not stem:
@@ -408,8 +408,8 @@ def export_pdf():
 
     Contract: ``POST /export-pdf`` with JSON ``{ svg, page_mm: { width, height } }``,
     optional ``title1``, ``title2``, and ``event_date`` (overlay strings used
-    only for the download filename: sortable ``YYYYMMDD``, Dutch long date,
-    then titles).
+    only for the download filename: sortable ``YYYYMMDD``, then titles, then
+    Dutch long date).
 
     ``svg`` is the full SVG export already produced client-side (the same
     document the user can download via "Save SVG"). The server splits the
@@ -452,14 +452,9 @@ def export_pdf():
             'style',
         )
 
-    # Default page_mm depends on the style: plexi-black uses the spec
-    # 245 x 330 mm (Thrucut + 10 mm bleed), forex uses the existing
-    # 238.5 x 328.6 mm (Thrucut + 6% bleed). The client always sends
-    # the right page size; this default just covers omitted-payload
-    # smoke tests and curl users.
-    style_default_page_mm = (
-        PLEXI_PAGE_MM if style == STYLE_PLEXIGLAS_BLACK else PAGE_TARGET_MM
-    )
+    # Default page_mm when omitted: 245 x 330 mm (Thrucut + 10 mm bleed)
+    # for every style — forex and plexiglas_black share the same media size.
+    style_default_page_mm = PAGE_TARGET_MM
 
     page_mm_payload = payload.get('page_mm') or {}
     if not isinstance(page_mm_payload, dict):

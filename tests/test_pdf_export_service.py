@@ -567,7 +567,7 @@ def test_build_pdf_real_fixture_renders_with_separation(export_service):
 #
 # Forex (default) and Plexiglas Black share the parse + split + thrucut
 # scaling preamble but differ in:
-#   - page geometry (forex 238.5x328.6 vs plexi 245x330)
+#   - page geometry (forex and plexi both 245x330 mm media; plexi adds TrimBox)
 #   - second spot color (plexi adds /Separation /White)
 #   - TrimBox metadata (plexi only)
 #   - which paint is preserved on the visible-art Drawing (plexi

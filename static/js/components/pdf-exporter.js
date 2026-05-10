@@ -21,10 +21,10 @@
 class PDFExporter {
     /** Per-style PDF page geometry, in millimetres.
      *
-     *   forex            -> 238.5 x 328.6 mm. Thrucut is 225 x 310 mm; the
-     *                       6% proportional bleed around it gives the user-
-     *                       visible canvas (same 225/310 aspect ratio)
-     *                       roughly 7 mm horizontal and 9 mm vertical bleed.
+     *   forex            -> 245 x 330 mm (Thrucut 225 x 310 mm + 10 mm bleed
+     *                       per edge). Same physical page size as Plexiglas
+     *                       Black so both products align in prepress; forex
+     *                       omits the TrimBox / White spot pipeline.
      *
      *   plexiglas_black  -> 245 x 330 mm. The Plexiglas Black product spec
      *                       requires a fixed 10 mm bleed on every side, so
@@ -37,7 +37,7 @@ class PDFExporter {
      * size into production.
      */
     static PAGE_MM_BY_STYLE = Object.freeze({
-        forex: Object.freeze({ width: 238.5, height: 328.6 }),
+        forex: Object.freeze({ width: 245.0, height: 330.0 }),
         plexiglas_black: Object.freeze({ width: 245.0, height: 330.0 }),
     });
 
