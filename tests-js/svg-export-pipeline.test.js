@@ -729,6 +729,141 @@ test('markers: each route in a multi-route export keeps its own marker colour', 
     }
 });
 
+test('markers: buildMarkerFeaturesForRoute merges S+F when map projects endpoints to same screen spot', () => {
+    const GPXMapManager = require('../static/js/gpx-map-manager.js');
+    const stub = Object.assign(Object.create(GPXMapManager.prototype), {
+        map: {
+            project: () => ({ x: 100, y: 200 }),
+            isStyleLoaded: () => true,
+        },
+    });
+    const route = {
+        coordinates: [
+            [5.1, 52.0],
+            [5.15, 52.02],
+            [5.2, 52.04],
+        ],
+        showStartMarker: true,
+        showFinishMarker: true,
+        startMarkerColor: '#00aa00',
+        finishMarkerColor: '#aa0000',
+    };
+    const feats = GPXMapManager.prototype.buildMarkerFeaturesForRoute.call(stub, route, 'track-1');
+    assert.equal(feats.length, 1);
+    assert.equal(feats[0].properties['marker-symbol'], 'S / F');
+    assert.equal(feats[0].geometry.coordinates[0], (5.1 + 5.2) / 2);
+    assert.equal(feats[0].geometry.coordinates[1], (52.0 + 52.04) / 2);
+});
+
+test('markers: buildMarkerFeaturesForRoute keeps S and F separate when projected far apart', () => {
+    const GPXMapManager = require('../static/js/gpx-map-manager.js');
+    let n = 0;
+    const stub = Object.assign(Object.create(GPXMapManager.prototype), {
+        map: {
+            project: () => ({ x: (n++) * 500, y: 50 }),
+            isStyleLoaded: () => true,
+        },
+    });
+    const route = {
+        coordinates: [
+            [5.1, 52.0],
+            [5.2, 52.04],
+        ],
+        showStartMarker: true,
+        showFinishMarker: true,
+        startMarkerColor: '#00aa00',
+        finishMarkerColor: '#aa0000',
+    };
+    const feats = GPXMapManager.prototype.buildMarkerFeaturesForRoute.call(stub, route, 'track-2');
+    assert.equal(feats.length, 2);
+    assert.ok(feats.some((f) => f.properties['marker-symbol'] === 'S'));
+    assert.ok(feats.some((f) => f.properties['marker-symbol'] === 'F'));
+});
+
+test('markers: viewport refresh is rAF-batched and skips setData when decision is unchanged', () => {
+    const GPXMapManager = require('../static/js/gpx-map-manager.js');
+
+    // Capture rAF callbacks so the test drives the timing manually instead of waiting
+    // 16ms per frame; rAF is what makes the marker collapse feel real-time.
+    const queuedFrames = [];
+    const realRaf = global.requestAnimationFrame;
+    global.requestAnimationFrame = (cb) => {
+        queuedFrames.push(cb);
+        return queuedFrames.length;
+    };
+
+    const setDataCalls = [];
+    const stub = Object.assign(Object.create(GPXMapManager.prototype), {
+        showMarkers: true,
+        markersSource: null,
+        _lastMarkerDecisions: new Map(),
+        _markerViewportRafId: null,
+        routes: new Map([
+            ['track', {
+                coordinates: [[5.1, 52.0], [5.2, 52.04]],
+                showStartMarker: true,
+                showFinishMarker: true,
+                startMarkerColor: '#00aa00',
+                finishMarkerColor: '#aa0000',
+            }],
+        ]),
+        map: {
+            // Far apart in pixels: decision = "split" (S + F).
+            project: () => ({ x: Math.random() * 10_000, y: 50 }),
+            isStyleLoaded: () => true,
+            getSource: () => ({ setData: (data) => setDataCalls.push(data) }),
+            addSource: () => {},
+            addLayer: () => {},
+            getLayer: () => null,
+            setLayoutProperty: () => {},
+            moveLayer: () => {},
+        },
+    });
+
+    try {
+        // Many move events in one frame should coalesce to ONE rAF callback.
+        for (let i = 0; i < 10; i++) stub._scheduleRefreshMarkersForViewport();
+        assert.equal(queuedFrames.length, 1, 'multiple move events must batch to one rAF');
+
+        // First frame: decision flips from empty to "F|S" → write expected.
+        queuedFrames.shift()();
+        assert.equal(setDataCalls.length, 1, 'first refresh must write to source');
+
+        // Second frame with same decision (still split) → no setData write.
+        stub._scheduleRefreshMarkersForViewport();
+        assert.equal(queuedFrames.length, 1);
+        queuedFrames.shift()();
+        assert.equal(setDataCalls.length, 1, 'unchanged decision must skip setData');
+
+        // Flip the projection to overlap → decision becomes "S / F" → write expected.
+        stub.map.project = () => ({ x: 100, y: 200 });
+        stub._scheduleRefreshMarkersForViewport();
+        queuedFrames.shift()();
+        assert.equal(setDataCalls.length, 2, 'collapse flip must write once');
+    } finally {
+        global.requestAnimationFrame = realRaf;
+    }
+});
+
+test('markers: loop endpoints within ~25m merge (combined S/F, no stacked markers)', () => {
+    const GPXMapManager = require('../static/js/gpx-map-manager.js');
+    const { ok, equal } = assert;
+
+    ok(GPXMapManager.areLoopEndpointsCoincide([6, 52.1], [6, 52.1]), 'identical points');
+    const metresPerDegLat = 111_320;
+    const fifteenM = 15 / metresPerDegLat;
+    ok(
+        GPXMapManager.areLoopEndpointsCoincide([6.123456, 52.1], [6.123456, 52.1 + fifteenM]),
+        'typical GPX closure noise should still merge'
+    );
+    const hundredM = 100 / metresPerDegLat;
+    equal(
+        GPXMapManager.areLoopEndpointsCoincide([6, 52.1], [6, 52.1 + hundredM]),
+        false,
+        'start and finish 100m apart stay separate markers'
+    );
+});
+
 test('markers: marker-labels feature is deduped to avoid stacked markers', () => {
     // Mapbox's symbol layer for `marker-labels` emits the same point as
     // `marker-circles`. Without the dedupe each endpoint exports two
@@ -757,7 +892,49 @@ test('markers: marker-labels feature is deduped to avoid stacked markers', () =>
         'pointToSVG must skip the marker-labels companion layer');
 });
 
-// ---------------------------------------------------------------------------
+test('markers: export map `markers` symbol layer is deduped like marker-labels', () => {
+    FeatureConverter.resetFontTracking();
+    const paint = {
+        'circle-radius': 8,
+        'circle-color': ['get', 'marker-color'],
+        'text-color': '#ffffff',
+    };
+    const layout = {
+        'text-field': ['get', 'marker-symbol'],
+        'text-size': 12,
+    };
+    const props = {
+        'marker-symbol': 'F',
+        'marker-color': '#00ff00',
+    };
+    const labels = FeatureConverter.pointToSVG(
+        [0, 0], props, paint, layout, makeStubProjection(), 'markers'
+    );
+    assert.equal(labels, null,
+        'pointToSVG must skip the export symbol companion layer');
+});
+
+test('markers: combined S / F uses per-feature radius and label size', () => {
+    FeatureConverter.resetFontTracking();
+    const paint = {
+        'circle-radius': ['get', 'marker-radius'],
+        'circle-color': ['get', 'marker-color'],
+        'text-color': '#ffffff',
+    };
+    const layout = {};
+    const props = {
+        'marker-symbol': 'S / F',
+        'marker-color': '#4ea6a0',
+        'marker-radius': 16,
+        'marker-label-size': 10,
+    };
+    const svg = FeatureConverter.pointToSVG(
+        [5.1, 52.0], props, paint, layout, makeStubProjection(), 'marker-circles'
+    );
+    assert.ok(svg.includes('r="16"'), `expected r=16 from feature props, got: ${svg}`);
+    assert.ok(svg.includes('font-size="10"'), `expected label size from props, got: ${svg}`);
+    assert.ok(svg.includes('S / F'), `expected combined label, got: ${svg}`);
+});
 // updateActiveRouteColor scope (gpx-map-manager.js regression)
 // ---------------------------------------------------------------------------
 //

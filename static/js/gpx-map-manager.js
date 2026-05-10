@@ -1,3 +1,59 @@
+/** Great-circle distance in metres between two [lng, lat] WGS84 points. */
+function distanceMetersLngLat(a, b) {
+    if (
+        !Array.isArray(a) ||
+        !Array.isArray(b) ||
+        a.length < 2 ||
+        b.length < 2 ||
+        !Number.isFinite(a[0]) ||
+        !Number.isFinite(a[1]) ||
+        !Number.isFinite(b[0]) ||
+        !Number.isFinite(b[1])
+    ) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const R = 6371000;
+    const lat1 = (a[1] * Math.PI) / 180;
+    const lat2 = (b[1] * Math.PI) / 180;
+    const dLat = ((b[1] - a[1]) * Math.PI) / 180;
+    const dLng = ((b[0] - a[0]) * Math.PI) / 180;
+    const s =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/** Max straight-line distance (m) between first and last track point to use one "S / F" marker instead of two. */
+const LOOP_ENDPOINT_MERGE_MAX_METERS = 25;
+
+/**
+ * True when start and finish should be drawn as one "S / F" marker (loops / closed tracks).
+ * GPX closures often differ by metres of GPS noise; a degree-epsilon was too strict and left
+ * two stacked circles on top of each other.
+ */
+function loopEndpointsCoincide(a, b, maxMeters = LOOP_ENDPOINT_MERGE_MAX_METERS) {
+    return distanceMetersLngLat(a, b) <= maxMeters;
+}
+
+/**
+ * If projected S and F centres are closer than 2× single-marker radius + this slack (px),
+ * show one "S / F" at the geographic midpoint so zoomed-out views do not stack two disks.
+ */
+const SCREEN_S_F_MERGE_EXTRA_PX = 4;
+
+/** Per-endpoint layout: single-letter markers stay compact; "S / F" uses a larger circle vs. font for the wider label. */
+const ENDPOINT_MARKER_SINGLE = Object.freeze({
+    'marker-radius': 10,
+    'marker-label-size': 12,
+});
+const ENDPOINT_MARKER_COMBINED = Object.freeze({
+    'marker-radius': 16,
+    'marker-label-size': 10,
+});
+
+const MARKER_RADIUS_LAYOUT = Object.freeze(['coalesce', ['get', 'marker-radius'], 10]);
+const MARKER_LABEL_SIZE_LAYOUT = Object.freeze(['coalesce', ['get', 'marker-label-size'], 12]);
+
 class GPXMapManager {
     constructor(mapboxAccessToken) {
         this.mapboxAccessToken = mapboxAccessToken;
@@ -7,7 +63,12 @@ class GPXMapManager {
         this.activeRouteId = null; // Currently selected route for editing
         this.markersSource = null;
         this.showMarkers = true;
-        
+        // rAF handle so viewport-driven marker refreshes coalesce to one per frame.
+        this._markerViewportRafId = null;
+        // Per-route signature of the last decision rendered to the source. Used to
+        // skip setData when pan/zoom didn't flip any "S / F" merge decision.
+        this._lastMarkerDecisions = new Map();
+
         // Set the access token
         mapboxgl.accessToken = mapboxAccessToken;
     }
@@ -86,6 +147,13 @@ class GPXMapManager {
         // Initial style load
         this.setAndFixStyle(mapStyles[this.currentStyle]);
 
+        // `move` fires every frame during pan/zoom and during fitBounds animation,
+        // so collapse/split flips are reflected in real time. The handler below
+        // rAF-throttles, and only writes to the source when the decision changed.
+        this.map.on('move', () => this._scheduleRefreshMarkersForViewport());
+        // Final pass after the camera settles, in case rAF dropped the last frame.
+        this.map.on('moveend', () => this._scheduleRefreshMarkersForViewport());
+
         return this.map;
     }
 
@@ -98,8 +166,8 @@ class GPXMapManager {
             }
         });
         
-        if (this.showMarkers && this.markersSource && !this.map.getSource('markers')) {
-            this.addMarkersToMap();
+        if (this.showMarkers && this.routes.size > 0 && !this.map.getSource('markers')) {
+            this.refreshAllRouteMarkers();
         }
         setTimeout(() => {
             this.map.resize();
@@ -123,6 +191,11 @@ class GPXMapManager {
             this.map.removeSource('markers');
         }
         this.markersSource = null;
+        this._lastMarkerDecisions.clear();
+        if (this._markerViewportRafId !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._markerViewportRafId);
+            this._markerViewportRafId = null;
+        }
     }
 
     async addRoute(routeId, trackPoints, color, filename) {
@@ -282,14 +355,10 @@ class GPXMapManager {
                     this.map.removeSource('markers');
                 }
                 this.markersSource = null;
+                this._lastMarkerDecisions.clear();
             } else if (this.showMarkers) {
-                // Remove markers for this specific route and recreate markers for remaining routes
-                if (this.markersSource) {
-                    this.markersSource.data.features = this.markersSource.data.features.filter(
-                        feature => feature.properties['route-id'] !== routeId
-                    );
-                    this.addMarkersToMap();
-                }
+                this._lastMarkerDecisions.delete(routeId);
+                this.refreshAllRouteMarkers();
             }
             
             // Fit bounds to remaining routes
@@ -302,61 +371,176 @@ class GPXMapManager {
         }
     }
 
-    createMarkers(coordinates, routeId) {
-        if (coordinates.length === 0) return;
-        
-        const route = this.routes.get(routeId);
-        if (!route) return;
-        
-        // If markers source doesn't exist, create it
+    _scheduleRefreshMarkersForViewport() {
+        if (!this.showMarkers || this.routes.size === 0) {
+            return;
+        }
+        if (this._markerViewportRafId !== null) {
+            return;
+        }
+        const raf = (typeof requestAnimationFrame === 'function')
+            ? requestAnimationFrame
+            : ((cb) => setTimeout(cb, 16));
+        this._markerViewportRafId = raf(() => {
+            this._markerViewportRafId = null;
+            // Viewport-driven refreshes: skip the GeoJSON write if no route's
+            // collapse/split decision changed (cheap diff, no setData hammering).
+            this.refreshAllRouteMarkers({ skipIfUnchanged: true });
+        });
+    }
+
+    /**
+     * Stable signature describing a route's marker decision (which symbols are present).
+     * The geometry of each marker doesn't change with zoom — only the merge decision does —
+     * so flipping this string is sufficient evidence to redraw.
+     */
+    _decisionSignatureForFeatures(features) {
+        if (!features || features.length === 0) return '';
+        return features
+            .map((f) => f.properties && f.properties['marker-symbol'])
+            .filter(Boolean)
+            .sort()
+            .join('|');
+    }
+
+    /**
+     * Whether S and F would overlap on screen as two separate circle markers (single-marker radius).
+     */
+    startFinishOverlapInScreenPixels(startLngLat, endLngLat) {
+        if (!this.map || typeof this.map.project !== 'function') {
+            return false;
+        }
+        if (typeof this.map.isStyleLoaded === 'function' && !this.map.isStyleLoaded()) {
+            return false;
+        }
+        try {
+            const p0 = this.map.project(startLngLat);
+            const p1 = this.map.project(endLngLat);
+            const dist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
+            const r = ENDPOINT_MARKER_SINGLE['marker-radius'];
+            return dist < r + r + SCREEN_S_F_MERGE_EXTRA_PX;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    buildMarkerFeaturesForRoute(route, routeId) {
+        const coordinates = route.coordinates;
+        if (!coordinates || coordinates.length === 0) {
+            return [];
+        }
+        const showStart = route.showStartMarker !== false;
+        const showFinish = route.showFinishMarker !== false;
+        if (!showStart && !showFinish) {
+            return [];
+        }
+
+        const startCoord = coordinates[0];
+        const endCoord = coordinates[coordinates.length - 1];
+        const sameGeoLoop = showStart && showFinish && loopEndpointsCoincide(startCoord, endCoord);
+        const screenCollapse =
+            showStart &&
+            showFinish &&
+            !sameGeoLoop &&
+            this.startFinishOverlapInScreenPixels(startCoord, endCoord);
+
+        if (sameGeoLoop || screenCollapse) {
+            const coords = sameGeoLoop
+                ? startCoord
+                : [(startCoord[0] + endCoord[0]) / 2, (startCoord[1] + endCoord[1]) / 2];
+            return [
+                {
+                    type: 'Feature',
+                    properties: {
+                        'marker-symbol': 'S / F',
+                        'marker-color': route.startMarkerColor,
+                        'route-id': routeId,
+                        ...ENDPOINT_MARKER_COMBINED,
+                    },
+                    geometry: {
+                        type: 'Point',
+                        coordinates: coords,
+                    },
+                },
+            ];
+        }
+
+        const features = [];
+        if (showStart) {
+            features.push({
+                type: 'Feature',
+                properties: {
+                    'marker-symbol': 'S',
+                    'marker-color': route.startMarkerColor,
+                    'route-id': routeId,
+                    ...ENDPOINT_MARKER_SINGLE,
+                },
+                geometry: { type: 'Point', coordinates: startCoord },
+            });
+        }
+        if (showFinish) {
+            features.push({
+                type: 'Feature',
+                properties: {
+                    'marker-symbol': 'F',
+                    'marker-color': route.finishMarkerColor,
+                    'route-id': routeId,
+                    ...ENDPOINT_MARKER_SINGLE,
+                },
+                geometry: { type: 'Point', coordinates: endCoord },
+            });
+        }
+        return features;
+    }
+
+    refreshAllRouteMarkers({ skipIfUnchanged = false } = {}) {
+        if (!this.map || !this.showMarkers || this.routes.size === 0) {
+            return;
+        }
+
+        const features = [];
+        const newDecisions = new Map();
+        this.routes.forEach((route, routeId) => {
+            const routeFeatures = this.buildMarkerFeaturesForRoute(route, routeId);
+            features.push(...routeFeatures);
+            newDecisions.set(routeId, this._decisionSignatureForFeatures(routeFeatures));
+        });
+
+        if (skipIfUnchanged && this._lastMarkerDecisions.size === newDecisions.size) {
+            let unchanged = true;
+            for (const [routeId, sig] of newDecisions) {
+                if (this._lastMarkerDecisions.get(routeId) !== sig) {
+                    unchanged = false;
+                    break;
+                }
+            }
+            if (unchanged) {
+                return;
+            }
+        }
+        this._lastMarkerDecisions = newDecisions;
+
         if (!this.markersSource) {
             this.markersSource = {
                 type: 'geojson',
                 data: {
                     type: 'FeatureCollection',
-                    features: []
-                }
+                    features: [],
+                },
             };
         }
-        
-        // Remove existing markers for this route
-        this.markersSource.data.features = this.markersSource.data.features.filter(
-            feature => feature.properties['route-id'] !== routeId
-        );
-        
-        // Add start marker if enabled
-        if (route.showStartMarker !== false) {
-            this.markersSource.data.features.push({
-                type: 'Feature',
-                properties: {
-                    'marker-symbol': 'S',
-                    'marker-color': route.startMarkerColor,
-                    'route-id': routeId
-                },
-                geometry: {
-                    type: 'Point',
-                    coordinates: coordinates[0]
-                }
-            });
-        }
-        
-        // Add finish marker if enabled
-        if (route.showFinishMarker !== false) {
-            this.markersSource.data.features.push({
-                type: 'Feature',
-                properties: {
-                    'marker-symbol': 'F',
-                    'marker-color': route.finishMarkerColor,
-                    'route-id': routeId
-                },
-                geometry: {
-                    type: 'Point',
-                    coordinates: coordinates[coordinates.length - 1]
-                }
-            });
-        }
+        this.markersSource.data.features = features;
 
         this.addMarkersToMap();
+        this.ensureMarkersOnTop();
+    }
+
+    createMarkers(coordinates, routeId) {
+        if (!coordinates || coordinates.length === 0) return;
+        if (!this.routes.get(routeId)) return;
+        void coordinates;
+        void routeId;
+        this.refreshAllRouteMarkers();
     }
 
     addMarkersToMap() {
@@ -372,7 +556,7 @@ class GPXMapManager {
                 type: 'circle',
                 source: 'markers',
                 paint: {
-                    'circle-radius': 10,
+                    'circle-radius': MARKER_RADIUS_LAYOUT,
                     'circle-color': ['get', 'marker-color'],
                     'circle-opacity': 1.0
                 }
@@ -385,10 +569,13 @@ class GPXMapManager {
                 source: 'markers',
                 layout: {
                     'text-field': ['get', 'marker-symbol'],
-                    'text-size': 12,
+                    'text-size': MARKER_LABEL_SIZE_LAYOUT,
                     'text-font': ['Open Sans Bold'],
                     'text-offset': [0, 0],
-                    'text-anchor': 'center'
+                    'text-anchor': 'center',
+                    // Default symbol collision hides nearby labels; circles still draw, so F can vanish when S/F are close.
+                    'text-allow-overlap': true,
+                    'text-ignore-placement': true,
                 },
                 paint: {
                     'text-color': '#ffffff',
@@ -398,6 +585,11 @@ class GPXMapManager {
         } else {
             // Update existing markers source
             this.map.getSource('markers').setData(this.markersSource.data);
+        }
+
+        if (this.map.getLayer('marker-labels')) {
+            this.map.setLayoutProperty('marker-labels', 'text-allow-overlap', true);
+            this.map.setLayoutProperty('marker-labels', 'text-ignore-placement', true);
         }
         
         // Ensure marker layers are always on top by moving them to the end
@@ -461,8 +653,9 @@ class GPXMapManager {
             // Update markers if they exist and belong to this route
             if (this.markersSource) {
                 const startMarker = this.markersSource.data.features.find(
-                    feature => feature.properties['marker-symbol'] === 'S' && 
-                              feature.properties['route-id'] === this.activeRouteId
+                    feature => feature.properties['route-id'] === this.activeRouteId &&
+                        (feature.properties['marker-symbol'] === 'S' ||
+                            feature.properties['marker-symbol'] === 'S / F')
                 );
                 if (startMarker) {
                     startMarker.properties['marker-color'] = color;
@@ -482,8 +675,9 @@ class GPXMapManager {
             // Update markers if they exist and belong to this route
             if (this.markersSource) {
                 const finishMarker = this.markersSource.data.features.find(
-                    feature => feature.properties['marker-symbol'] === 'F' && 
-                              feature.properties['route-id'] === this.activeRouteId
+                    feature => feature.properties['route-id'] === this.activeRouteId &&
+                        (feature.properties['marker-symbol'] === 'F' ||
+                            feature.properties['marker-symbol'] === 'S / F')
                 );
                 if (finishMarker) {
                     finishMarker.properties['marker-color'] = color;
@@ -518,14 +712,12 @@ class GPXMapManager {
         this.showMarkers = show;
         
         if (show && this.routes.size > 0) {
-            // Show markers for all routes
-            // Markers will be added after all routes, ensuring they appear on top
-            this.routes.forEach((route, routeId) => {
-                if (route.showStartMarker || route.showFinishMarker) { // Show if at least one is enabled
-                    this.createMarkers(route.coordinates, routeId);
-                }
-            });
-            // Ensure markers are on top after toggling
+            const anyShown = [...this.routes.values()].some(
+                (r) => r.showStartMarker || r.showFinishMarker
+            );
+            if (anyShown) {
+                this.refreshAllRouteMarkers();
+            }
             this.ensureMarkersOnTop();
         } else {
             // Remove markers
@@ -535,6 +727,7 @@ class GPXMapManager {
                 this.map.removeSource('markers');
             }
             this.markersSource = null;
+            this._lastMarkerDecisions.clear();
         }
     }
 
@@ -570,6 +763,8 @@ class GPXMapManager {
         return this.routes;
     }
 }
+
+GPXMapManager.areLoopEndpointsCoincide = loopEndpointsCoincide;
 
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {

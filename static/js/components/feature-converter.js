@@ -540,7 +540,8 @@ class FeatureConverter {
         // marker-labels feature here gives one marker per endpoint, with the
         // route's actual `marker-color` instead of an unevaluated expression
         // string sneaking through the symbol-layer code path.
-        if (layerId === 'marker-labels') {
+        // Export maps use id `markers` for the same symbol companion layer.
+        if (layerId === 'marker-labels' || layerId === 'markers') {
             return null;
         }
 
@@ -555,7 +556,15 @@ class FeatureConverter {
         
         // Handle combined circle+text markers (like S and F start/finish markers)
         if (isMarkerFeature && hasCircle && hasText) {
-            const radius = paint['circle-radius'] || 10;
+            let radius = paint['circle-radius'] || 10;
+            if (radius && typeof radius === 'object') {
+                const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
+                const evaluated = ExportUtilities.evaluateExpression(radius, { ...properties, zoom });
+                radius = Number(evaluated);
+                if (!Number.isFinite(radius)) {
+                    radius = 10;
+                }
+            }
             const circleColor = FeatureConverter._resolveMarkerCircleColor(paint, properties);
             let circleOpacity = paint['circle-opacity'] || 1;
             
@@ -767,7 +776,10 @@ class FeatureConverter {
             // visibly low inside a marker circle.
             if (isMarkerFeature && properties['marker-symbol'] && properties['marker-color']) {
                 const markerColor = properties['marker-color'];
-                const markerRadius = 10;
+                let markerRadius = Number(properties['marker-radius']);
+                if (!Number.isFinite(markerRadius)) {
+                    markerRadius = 10;
+                }
 
                 const markerTextAttrs = [
                     `x="${x.toFixed(2)}"`,
@@ -795,7 +807,15 @@ class FeatureConverter {
         
         // Handle circle markers (only for actual marker features, not place labels)
         if (paint['circle-radius']) {
-            const radius = paint['circle-radius'] || 5;
+            let radius = paint['circle-radius'] || 5;
+            if (radius && typeof radius === 'object') {
+                const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
+                const evaluated = ExportUtilities.evaluateExpression(radius, { ...properties, zoom });
+                radius = Number(evaluated);
+                if (!Number.isFinite(radius)) {
+                    radius = 5;
+                }
+            }
             const color = isMarkerFeature
                 ? FeatureConverter._resolveMarkerCircleColor(paint, properties)
                 : (paint['circle-color'] || properties['marker-color'] || '#ff0000');
@@ -809,7 +829,12 @@ class FeatureConverter {
             // ENHANCED: For marker features, also add the symbol text on top of the circle
             if (isMarkerFeature && properties['marker-symbol']) {
                 const text = properties['marker-symbol'];
-                const fontSize = 12;
+                let fontSize = Number(properties['marker-label-size']);
+                if (!Number.isFinite(fontSize)) {
+                    fontSize = properties['marker-symbol'] === 'S / F'
+                        ? radius * 0.75
+                        : radius * 1.2;
+                }
                 const textColor = '#ffffff';
                 
                 // Process font for marker text (same as other text elements)

@@ -311,30 +311,31 @@ class MapSynchronizer {
             
             if (hasAnyMarkers && !exportMap.getSource('markers')) {
                 exportMap.addSource('markers', routeData.markersSource);
-                
-                const scaledCircleRadius = 10 * scalingFactor;
-                const scaledTextSize = 12 * scalingFactor;
-                
+
+                const scaledMarkerCircleRadius = ['*', ['coalesce', ['get', 'marker-radius'], 10], scalingFactor];
+                const scaledMarkerTextSize = ['*', ['coalesce', ['get', 'marker-label-size'], 12], scalingFactor];
+
                 exportMap.addLayer({
                     id: 'marker-circles',
                     type: 'circle',
                     source: 'markers',
                     paint: {
-                        'circle-radius': scaledCircleRadius,
+                        'circle-radius': scaledMarkerCircleRadius,
                         'circle-color': ['get', 'marker-color'],
                         'circle-opacity': 1.0 // Fully opaque markers
                     }
                 });
-                
+
                 exportMap.addLayer({
                     id: 'markers',
                     type: 'symbol',
                     source: 'markers',
                     layout: {
                         'text-field': ['get', 'marker-symbol'],
-                        'text-size': scaledTextSize,
+                        'text-size': scaledMarkerTextSize,
                         'text-anchor': 'center',
                         'text-allow-overlap': true,
+                        'text-ignore-placement': true,
                         'icon-image': 'none'
                     },
                     paint: {
@@ -342,8 +343,8 @@ class MapSynchronizer {
                         'text-opacity': 1.0
                     }
                 });
-                
-                console.log(`Marker styling scaled - Circle radius: ${scaledCircleRadius.toFixed(1)}, Text size: ${scaledTextSize.toFixed(1)}`);
+
+                console.log(`Marker styling scaled (S/F vs S-only) — factor: ${scalingFactor.toFixed(3)}`);
             }
             
             console.log('Route data synchronized successfully with scaled styling');

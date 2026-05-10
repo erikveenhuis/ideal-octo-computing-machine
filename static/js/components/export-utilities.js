@@ -129,10 +129,33 @@ class ExportUtilities {
         
         switch (operator) {
             case 'get':
-                if (expression[1]) {
-                    return properties[expression[1]] || '';
+                if (expression[1] && Object.prototype.hasOwnProperty.call(properties, expression[1])) {
+                    const v = properties[expression[1]];
+                    return v === undefined ? '' : v;
                 }
-                break;
+                return '';
+
+            case 'coalesce':
+                // Mapbox: first non-null input; missing `get` yields '' in our evaluator — treat as absent.
+                for (let i = 1; i < expression.length; i++) {
+                    const v = this.evaluateExpression(expression[i], properties);
+                    if (v !== null && v !== undefined && v !== '') {
+                        return v;
+                    }
+                }
+                return null;
+
+            case '*': {
+                let product = 1;
+                for (let i = 1; i < expression.length; i++) {
+                    const v = Number(this.evaluateExpression(expression[i], properties));
+                    if (!Number.isFinite(v)) {
+                        return NaN;
+                    }
+                    product *= v;
+                }
+                return product;
+            }
                 
             case 'interpolate':
                 // Handle interpolate expressions: ['interpolate', ['linear'], ['zoom'], ...stops]
