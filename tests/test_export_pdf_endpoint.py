@@ -61,6 +61,8 @@ def test_export_pdf_returns_pdf_with_thrucut(client):
     assert response.headers["Content-Type"] == "application/pdf"
     assert response.headers.get("Content-Disposition", "").startswith("attachment;")
     assert "filename=" in response.headers["Content-Disposition"]
+    cd = response.headers["Content-Disposition"]
+    assert "2026" in cd and ".pdf" in cd
 
     # X-PDF-* headers feed the front-end toast; they must parse as floats.
     width_mm = float(response.headers["X-PDF-Page-Width-mm"])
@@ -92,6 +94,36 @@ def test_export_pdf_returns_pdf_with_thrucut(client):
         assert found_ocg, "Thrucut OCG missing from response PDF"
     finally:
         doc.close()
+
+
+def test_export_pdf_filename_includes_titles_and_dutch_date(client):
+    """Optional ``title1`` / ``title2`` / ``event_date`` drive the download
+    name: ``YYYYMMDD`` prefix, Dutch long date, then title parts."""
+    response = client.post(
+        "/export-pdf",
+        json={
+            **_payload(),
+            "title1": "Utrecht",
+            "title2": "Marathon",
+            "event_date": "2026-04-12",
+        },
+    )
+    assert response.status_code == 200, response.get_data(as_text=True)
+    cd = response.headers["Content-Disposition"]
+    assert "20260412" in cd
+    assert "april" in cd.lower()
+    assert "Utrecht" in cd
+    assert "Marathon" in cd
+
+
+def test_export_pdf_rejects_invalid_title1_type(client):
+    response = client.post(
+        "/export-pdf",
+        json={**_payload(), "title1": 42},
+    )
+    assert response.status_code in (400, 422)
+    body = response.get_json()
+    assert body and "title1" in body.get("error", "").lower()
 
 
 def test_export_pdf_rejects_non_json_body(client):

@@ -14,8 +14,11 @@ can leave the WSGI worker importing stale code mid-update.
 import hashlib
 import hmac
 import os
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_limiter import Limiter
@@ -269,6 +272,133 @@ def _fetch_service_results(service_call, source_name: str, api_errors: list) -> 
 # pipeline doesn't waste CPU parsing it.
 _MAX_EXPORT_SVG_LENGTH = 32 * 1024 * 1024
 
+_MAX_EXPORT_TITLE_LEN = 80
+_MAX_EXPORT_EVENT_DATE_LEN = 40
+_EXPORT_FILENAME_MAX_STEM = 200
+
+_DUTCH_MONTHS = (
+    "",
+    "januari",
+    "februari",
+    "maart",
+    "april",
+    "mei",
+    "juni",
+    "juli",
+    "augustus",
+    "september",
+    "oktober",
+    "november",
+    "december",
+)
+_DUTCH_MONTH_TO_NUM = {name: i for i, name in enumerate(_DUTCH_MONTHS) if name}
+
+
+def _dutch_long_date(d: date) -> str:
+    return f"{d.day} {_DUTCH_MONTHS[d.month]} {d.year}"
+
+
+def _parse_event_date(raw: str | None) -> date | None:
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    m = re.match(r"^(\d{1,2})\s+([a-zàéèêëöüç]+)\s+(\d{4})$", s, re.I)
+    if m:
+        day, month_word, year = int(m.group(1)), m.group(2).lower(), int(m.group(3))
+        month_num = _DUTCH_MONTH_TO_NUM.get(month_word)
+        if month_num is not None:
+            try:
+                return date(year, month_num, day)
+            except ValueError:
+                return None
+    return None
+
+
+def _sanitize_pdf_filename_piece(text: str, max_len: int = _MAX_EXPORT_TITLE_LEN) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r'[\x00-\x1f\\\/:\*\?"<>\|]', " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len].rstrip()
+    return cleaned
+
+
+def _build_export_pdf_filename(
+    title1: str,
+    title2: str,
+    event_date_raw: str | None,
+    *,
+    fallback_today: date,
+) -> str:
+    parsed = _parse_event_date(event_date_raw)
+    use_date = parsed if parsed is not None else fallback_today
+    sortable = use_date.strftime("%Y%m%d")
+    human_nl = _dutch_long_date(use_date)
+    s1 = _sanitize_pdf_filename_piece(title1)
+    s2 = _sanitize_pdf_filename_piece(title2)
+    pieces = [sortable, human_nl]
+    if s1:
+        pieces.append(s1)
+    if s2:
+        pieces.append(s2)
+    stem = " ".join(pieces)
+    stem = stem[:_EXPORT_FILENAME_MAX_STEM].rstrip()
+    if not stem:
+        stem = f"{sortable} export"
+    return f"{stem}.pdf"
+
+
+def _attachment_content_disposition(filename: str) -> str:
+    """RFC 5987 ``filename*`` when ``filename`` is not 7-bit clean."""
+    safe = []
+    for c in filename:
+        o = ord(c)
+        if c in '\\/:*?"<>|' or o < 32:
+            safe.append("_")
+        elif o < 128:
+            safe.append(c)
+        else:
+            safe.append("_")
+    safe_name = "".join(safe)
+    if not safe_name.strip("._"):
+        safe_name = "export.pdf"
+    if safe_name == filename:
+        return f'attachment; filename="{filename}"'
+    return (
+        f'attachment; filename="{safe_name}"; '
+        f"filename*=UTF-8''{quote(filename, safe='')}"
+    )
+
+
+def _read_optional_pdf_export_meta(payload: dict) -> tuple[str, str, str | None]:
+    title1 = payload.get("title1")
+    title2 = payload.get("title2")
+    event_date = payload.get("event_date")
+    if title1 is not None and not isinstance(title1, str):
+        raise ValidationError("title1 must be a string", "title1")
+    if title2 is not None and not isinstance(title2, str):
+        raise ValidationError("title2 must be a string", "title2")
+    if event_date is not None and not isinstance(event_date, str):
+        raise ValidationError("event_date must be a string", "event_date")
+    t1 = (title1 or "").strip()
+    t2 = (title2 or "").strip()
+    ed = (event_date or "").strip() if event_date else None
+    if len(t1) > _MAX_EXPORT_TITLE_LEN:
+        t1 = t1[:_MAX_EXPORT_TITLE_LEN]
+    if len(t2) > _MAX_EXPORT_TITLE_LEN:
+        t2 = t2[:_MAX_EXPORT_TITLE_LEN]
+    if ed and len(ed) > _MAX_EXPORT_EVENT_DATE_LEN:
+        ed = ed[:_MAX_EXPORT_EVENT_DATE_LEN]
+    return t1, t2, ed
+
 
 @app.route('/export-pdf', methods=['POST'])
 @limiter.limit(app.config['UPLOAD_RATE_LIMIT'])
@@ -276,7 +406,10 @@ _MAX_EXPORT_SVG_LENGTH = 32 * 1024 * 1024
 def export_pdf():
     """Build a print-ready PDF for the current GPX export state.
 
-    Contract: ``POST /export-pdf`` with JSON ``{ svg, page_mm: { width, height } }``.
+    Contract: ``POST /export-pdf`` with JSON ``{ svg, page_mm: { width, height } }``,
+    optional ``title1``, ``title2``, and ``event_date`` (overlay strings used
+    only for the download filename: sortable ``YYYYMMDD``, Dutch long date,
+    then titles).
 
     ``svg`` is the full SVG export already produced client-side (the same
     document the user can download via "Save SVG"). The server splits the
@@ -342,6 +475,8 @@ def export_pdf():
             'page_mm',
         )
 
+    title1_meta, title2_meta, event_date_meta = _read_optional_pdf_export_meta(payload)
+
     req = ExportRequest(svg_text=svg_text, page_mm=(page_w, page_h), style=style)
 
     try:
@@ -351,10 +486,16 @@ def export_pdf():
         return jsonify({'error': str(exc)}), 400
 
     from flask import Response
-    filename = f"gpx-route-{datetime.now(timezone.utc).date().isoformat()}.pdf"
+    today_nl = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
+    filename = _build_export_pdf_filename(
+        title1_meta,
+        title2_meta,
+        event_date_meta,
+        fallback_today=today_nl,
+    )
     headers = {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': f'attachment; filename="{filename}"',
+        'Content-Disposition': _attachment_content_disposition(filename),
         'Content-Length': str(len(result.pdf_bytes)),
         'X-PDF-Style': result.style,
         'X-PDF-Page-Width-mm': f"{result.page_size_mm[0]:.2f}",

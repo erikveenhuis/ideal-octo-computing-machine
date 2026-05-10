@@ -94,6 +94,7 @@ class PDFExporter {
             svg: svgString,
             style,
             page_mm: pageMm,
+            ...this._exportFilenameMeta(),
         });
 
         if (!response.ok) {
@@ -103,7 +104,7 @@ class PDFExporter {
 
         const blob = await response.blob();
         const filename = this._extractFilename(response)
-            || `gpx-route-${new Date().toISOString().split('T')[0]}.pdf`;
+            || this._fallbackPdfFilename();
         ExportUtilities.downloadBlob(blob, filename);
 
         const widthMm = response.headers.get('X-PDF-Page-Width-mm');
@@ -143,10 +144,43 @@ class PDFExporter {
         return `PDF export failed with HTTP ${response.status}`;
     }
 
+    _exportFilenameMeta() {
+        const app = typeof window !== 'undefined' ? window.gpxApp : null;
+        const values = app && app.overlayTextValues;
+        if (!values) {
+            return {};
+        }
+        const title1 = typeof values.title1 === 'string' ? values.title1.trim() : '';
+        const title2 = typeof values.title2 === 'string' ? values.title2.trim() : '';
+        const eventDate = typeof values.date === 'string' ? values.date.trim() : '';
+        const meta = {};
+        if (title1) meta.title1 = title1;
+        if (title2) meta.title2 = title2;
+        if (eventDate) meta.event_date = eventDate;
+        return meta;
+    }
+
+    _fallbackPdfFilename() {
+        const ymd = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        return `${ymd} gpx-export.pdf`;
+    }
+
     _extractFilename(response) {
         const cd = response.headers.get('Content-Disposition') || '';
-        const match = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-        return match ? decodeURIComponent(match[1]) : null;
+        const star = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+        if (star) {
+            try {
+                return decodeURIComponent(star[1].trim());
+            } catch (_) {
+                // fall through
+            }
+        }
+        const quoted = cd.match(/filename\s*=\s*"([^"]+)"/i);
+        if (quoted) {
+            return quoted[1];
+        }
+        const plain = cd.match(/filename\s*=\s*([^;\s]+)/i);
+        return plain ? plain[1] : null;
     }
 }
 
