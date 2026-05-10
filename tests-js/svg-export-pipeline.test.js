@@ -780,6 +780,50 @@ test('markers: buildMarkerFeaturesForRoute keeps S and F separate when projected
     assert.ok(feats.some((f) => f.properties['marker-symbol'] === 'F'));
 });
 
+test('markers: collapse/split decision has hysteresis to avoid flicker near threshold', () => {
+    const GPXMapManager = require('../static/js/gpx-map-manager.js');
+
+    // Two coordinates anchored along the same y; we control screen distance by
+    // swapping in different `map.project` stubs between calls.
+    const route = {
+        coordinates: [[5.0, 52.0], [5.1, 52.0]],
+        showStartMarker: true,
+        showFinishMarker: true,
+        startMarkerColor: '#0a0',
+        finishMarkerColor: '#a00',
+    };
+
+    let projectedDx = 0;
+    const stub = Object.assign(Object.create(GPXMapManager.prototype), {
+        _lastMarkerDecisions: new Map(),
+        map: {
+            project: (lnglat) => ({ x: lnglat[0] === 5.0 ? 0 : projectedDx, y: 0 }),
+            isStyleLoaded: () => true,
+        },
+    });
+
+    const decide = () => stub.buildMarkerFeaturesForRoute(route, 'r')
+        .map((f) => f.properties['marker-symbol']).sort().join('|');
+    const setPrev = (sig) => stub._lastMarkerDecisions.set('r', sig);
+
+    // Below MERGE_THRESHOLD (24px) → always merged, regardless of previous state.
+    projectedDx = 10;
+    setPrev('F|S');
+    assert.equal(decide(), 'S / F', 'small distance should merge from split');
+
+    // Above SPLIT_THRESHOLD (36px) → always split, regardless of previous state.
+    projectedDx = 60;
+    setPrev('S / F');
+    assert.equal(decide(), 'F|S', 'large distance should split from merged');
+
+    // Dead zone (24..36px) → stay in previous state.
+    projectedDx = 28;
+    setPrev('S / F');
+    assert.equal(decide(), 'S / F', 'in dead zone, previously-merged stays merged');
+    setPrev('F|S');
+    assert.equal(decide(), 'F|S', 'in dead zone, previously-split stays split');
+});
+
 test('markers: viewport refresh is rAF-batched and skips setData when decision is unchanged', () => {
     const GPXMapManager = require('../static/js/gpx-map-manager.js');
 

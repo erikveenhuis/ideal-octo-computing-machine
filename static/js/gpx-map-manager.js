@@ -35,12 +35,6 @@ function loopEndpointsCoincide(a, b, maxMeters = LOOP_ENDPOINT_MERGE_MAX_METERS)
     return distanceMetersLngLat(a, b) <= maxMeters;
 }
 
-/**
- * If projected S and F centres are closer than 2× single-marker radius + this slack (px),
- * show one "S / F" at the geographic midpoint so zoomed-out views do not stack two disks.
- */
-const SCREEN_S_F_MERGE_EXTRA_PX = 4;
-
 /** Per-endpoint layout: single-letter markers stay compact; "S / F" uses a larger circle vs. font for the wider label. */
 const ENDPOINT_MARKER_SINGLE = Object.freeze({
     'marker-radius': 10,
@@ -50,6 +44,16 @@ const ENDPOINT_MARKER_COMBINED = Object.freeze({
     'marker-radius': 16,
     'marker-label-size': 10,
 });
+
+// Hysteresis on the screen-space S/F merge so wheel-zoom wobble at the threshold
+// does not flicker the marker between merged and split. We use two thresholds with
+// a dead zone in the middle:
+//   - From SPLIT, only merge once the two single discs would clearly overlap.
+//   - From MERGED, only split once the gap is wide enough that the two single
+//     discs are no longer hidden under the larger combined disc footprint.
+// Without hysteresis a single threshold caused a brief flip while zooming through it.
+const MERGE_THRESHOLD_PX = 2 * ENDPOINT_MARKER_SINGLE['marker-radius'] + 4;   // 24px
+const SPLIT_THRESHOLD_PX = 2 * ENDPOINT_MARKER_COMBINED['marker-radius'] + 4; // 36px
 
 const MARKER_RADIUS_LAYOUT = Object.freeze(['coalesce', ['get', 'marker-radius'], 10]);
 const MARKER_LABEL_SIZE_LAYOUT = Object.freeze(['coalesce', ['get', 'marker-label-size'], 12]);
@@ -404,24 +408,45 @@ class GPXMapManager {
     }
 
     /**
-     * Whether S and F would overlap on screen as two separate circle markers (single-marker radius).
+     * Project two lng/lat points and return their pixel separation, or `null` if the map
+     * isn't ready (no map / no style loaded yet) so callers can keep the previous decision.
      */
-    startFinishOverlapInScreenPixels(startLngLat, endLngLat) {
+    _projectedDistancePx(startLngLat, endLngLat) {
         if (!this.map || typeof this.map.project !== 'function') {
-            return false;
+            return null;
         }
         if (typeof this.map.isStyleLoaded === 'function' && !this.map.isStyleLoaded()) {
-            return false;
+            return null;
         }
         try {
             const p0 = this.map.project(startLngLat);
             const p1 = this.map.project(endLngLat);
-            const dist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
-            const r = ENDPOINT_MARKER_SINGLE['marker-radius'];
-            return dist < r + r + SCREEN_S_F_MERGE_EXTRA_PX;
+            return Math.hypot(p0.x - p1.x, p0.y - p1.y);
         } catch (_) {
-            return false;
+            return null;
         }
+    }
+
+    /**
+     * Hysteretic decision: should S+F collapse to one "S / F" disc at the current zoom?
+     *
+     *   distance < MERGE_THRESHOLD (24px) → merge
+     *   distance > SPLIT_THRESHOLD (36px) → split
+     *   in between                        → keep `previouslyMerged`
+     */
+    _shouldMergeStartFinishOnScreen(startLngLat, endLngLat, previouslyMerged) {
+        const dist = this._projectedDistancePx(startLngLat, endLngLat);
+        if (dist === null) {
+            return Boolean(previouslyMerged);
+        }
+        if (dist < MERGE_THRESHOLD_PX) return true;
+        if (dist > SPLIT_THRESHOLD_PX) return false;
+        return Boolean(previouslyMerged);
+    }
+
+    /** True if the previous render of this route was a single combined "S / F" feature. */
+    _wasRoutePreviouslyMerged(routeId) {
+        return Boolean(this._lastMarkerDecisions) && this._lastMarkerDecisions.get(routeId) === 'S / F';
     }
 
     buildMarkerFeaturesForRoute(route, routeId) {
@@ -442,7 +467,11 @@ class GPXMapManager {
             showStart &&
             showFinish &&
             !sameGeoLoop &&
-            this.startFinishOverlapInScreenPixels(startCoord, endCoord);
+            this._shouldMergeStartFinishOnScreen(
+                startCoord,
+                endCoord,
+                this._wasRoutePreviouslyMerged(routeId)
+            );
 
         if (sameGeoLoop || screenCollapse) {
             const coords = sameGeoLoop

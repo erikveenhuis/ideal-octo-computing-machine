@@ -863,7 +863,27 @@ class GPXApp {
         const defaults = this.overlayTextDefaults[overlayId] || this.overlayTextDefaults.none;
         const title1Size = this.getFontSize(values.title1Size, defaults.title1Size);
         const title2Size = this.getFontSize(values.title2Size, defaults.title2Size);
+        // Vertical spacing between text rows is computed *relative to the
+        // preceding row*, not nailed to absolute Y constants. Without this,
+        // resizing title 2 in the UI used to bleed the title block into the
+        // fixed date Y (183.1047) — at title2Size > ~62 the two collided.
+        //
+        //   title2Offset : distance from title 1 baseline -> title 2 baseline.
+        //                  Scales with title 1 (line-height ≈ 0.6×) so a giant
+        //                  title 1 doesn't collapse onto title 2, and with
+        //                  title 2 (+4 px breathing room) so a giant title 2
+        //                  doesn't collide with title 1's descenders.
+        //   DATE_GAP     : constant baseline-to-baseline gap from title 2 to
+        //                  the date row. Pinned to the original Illustrator
+        //                  artwork's spacing (183.1047 - 148.32 ≈ 34.78 px at
+        //                  the default 46 / 20 / 20 sizing) so growing title 2
+        //                  shifts the date down by the same amount, keeping a
+        //                  consistent visual rhythm regardless of font size.
         const title2Offset = Math.max(title1Size * 0.6, title2Size + 4);
+        const TITLE_BASELINE_Y = 120.7204;
+        const DATE_GAP = 34.78;
+        const title2BaselineY = TITLE_BASELINE_Y + title2Offset;
+        const dateBaselineY = title2BaselineY + DATE_GAP;
 
         // Center reference above date (based on date rect center ~ x=231.4)
         const centerX = 231.4;
@@ -895,14 +915,18 @@ class GPXApp {
         const STAT_LABEL_STYLE = "font-family:'DIN Pro';font-size:20px;font-weight:normal;";
         const STAT_STYLE = "font-family:'DIN Pro';font-size:24px;font-weight:bold;";
 
-        // Title block centered
-        svgEl.appendChild(this.createTextElement(doc, centerX, 120.7204, [
+        // Title block centered. Title 2 sits at the title-1 baseline +
+        // title2Offset (computed above) so growing title 1 pushes title 2
+        // down with it.
+        svgEl.appendChild(this.createTextElement(doc, centerX, TITLE_BASELINE_Y, [
             { text: values.title1 || '', y: 0, style: TITLE_STYLE(title1Size) },
             { text: values.title2 || '', y: title2Offset, style: TITLE_STYLE(title2Size) }
         ], 'middle'));
 
-        // Date block centered beneath titles
-        svgEl.appendChild(this.createTextElement(doc, centerX, 183.1047, [
+        // Date block centered beneath titles. Anchored to the title 2
+        // baseline + dateGap so resizing either title shifts the date with
+        // it instead of letting the title bleed onto a fixed date Y.
+        svgEl.appendChild(this.createTextElement(doc, centerX, dateBaselineY, [
             { text: values.date || '', y: 0, style: DATE_STYLE }
         ], 'middle'));
 
