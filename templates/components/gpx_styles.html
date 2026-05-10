@@ -17,10 +17,19 @@
          * (10 mm bleed per edge) for both forex and plexiglas_black exports.
          */
         aspect-ratio: 225 / 310;
-        /* Container is 854px to account for 2px border on each side (854-4=850px internal). */
-        width: 854px;
-        /* Height follows aspect-ratio (~1177px) so the canvas reflects the
-           Thrucut shape directly rather than the previous 8.5x11 letter aspect. */
+        /*
+         * Scale the canvas to fit between the nav header (4rem) and the
+         * bottom of the viewport. Height is the natural driver because the
+         * canvas is portrait (225x310): height: 100% fills the available
+         * vertical space and width is auto-derived from aspect-ratio.
+         * max-width: 100% clamps the canvas on narrow / portrait viewports;
+         * modern browsers recompute height through the aspect-ratio when
+         * max-width kicks in, so the Thrucut proportions stay intact.
+         */
+        height: 100%;
+        width: auto;
+        max-width: 100%;
+        max-height: 100%;
         border: 2px solid #111;
         border-radius: 4px;
         overflow: hidden;
