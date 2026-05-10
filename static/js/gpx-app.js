@@ -927,6 +927,28 @@ class GPXApp {
             g.innerHTML = layer.innerHTML;
             previewClone.appendChild(g);
         }
+
+        // Preview uses <img src="data:image/svg+xml,...">. Unlike the export
+        // pipeline (svg-renderer.js), that SVG had no @font-face, so DIN Pro
+        // never loaded and UA fallback fonts diverged (e.g. serif on Windows vs
+        // sans on macOS). Embed the same DIN Pro Bold + Regular data URLs the
+        // exporter uses.
+        const fontManager = FeatureConverter.initializeFontManager();
+        const overlayFontDefs = await fontManager.generateSVGFontDefinitions([
+            { mapboxFontNames: ['DIN Pro Bold'] },
+            { mapboxFontNames: ['DIN Pro Regular'] }
+        ]);
+        if (overlayFontDefs) {
+            const wrapper = parser.parseFromString(
+                `<svg xmlns="http://www.w3.org/2000/svg">${overlayFontDefs}</svg>`,
+                'image/svg+xml'
+            );
+            const defsFromWrapper = wrapper.documentElement.firstElementChild;
+            if (defsFromWrapper) {
+                previewClone.insertBefore(defsFromWrapper.cloneNode(true), previewClone.firstChild);
+            }
+        }
+
         const fullSVG = serializer.serializeToString(previewClone);
 
         const overlayData = {
