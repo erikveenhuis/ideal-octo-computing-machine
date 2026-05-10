@@ -52,6 +52,14 @@ class SporthiveService:
 
             # Execute request
             response = self._make_request(url)
+            if response.status_code == 404:
+                current_app.logger.warning(
+                    "%s: global name search endpoint returned 404; skipping (%s)",
+                    self.source,
+                    url,
+                )
+                return []
+            response.raise_for_status()
 
             # Parse results
             results = self._parse_response(response.json())
@@ -115,8 +123,12 @@ class SporthiveService:
         """Make HTTP request to the API."""
         log_api_request(self.source, url)
 
-        response = requests.get(url, timeout=self.timeout)
-        response.raise_for_status()
+        headers = {
+            "Accept": "application/json",
+            "Origin": "https://sporthive.com",
+        }
+
+        response = requests.get(url, headers=headers, timeout=self.timeout)
         return response
 
     def _parse_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:

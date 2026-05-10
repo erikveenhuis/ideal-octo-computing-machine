@@ -67,6 +67,16 @@ class TestSporthiveServiceInternals:
 
 
 class TestSporthiveServiceSearch:
+    def test_search_returns_empty_when_endpoint_gone(
+        self, sporthive_service, app_context, requests_mock
+    ):
+        requests_mock.get(
+            "https://example.test/api/events/recentclassifications",
+            status_code=404,
+        )
+
+        assert sporthive_service.search_results("erik") == []
+
     def test_search_returns_parsed_results(
         self, sporthive_service, app_context, requests_mock
     ):
@@ -155,7 +165,7 @@ class TestSporthiveServiceSearch:
 
 @pytest.fixture
 def uitslagen_service():
-    return UitslagenService(base_url="https://example.test/zoek.html", timeout=5)
+    return UitslagenService(base_url="https://example.test/results.php", timeout=5)
 
 
 # A minimal HTML response that exercises the parser's primary selector.
@@ -176,7 +186,7 @@ class TestUitslagenServiceInternals:
     def test_build_search_url(self, uitslagen_service):
         url = uitslagen_service._build_search_url("erik veenhuis")
         assert "naam=erik+veenhuis" in url
-        assert url.endswith("&gbjr=#")
+        assert "gbjr=" in url and "exct=" in url and "next=" in url
 
     def test_validate_name_rejects_empty(self, uitslagen_service):
         with pytest.raises(ValidationError):
@@ -192,7 +202,7 @@ class TestUitslagenServiceSearch:
         # returns a list; whether the parser finds rows in this synthetic
         # markup is implementation-detail and not the contract under test.
         requests_mock.get(
-            "https://example.test/zoek.html",
+            "https://example.test/results.php",
             text=_MINIMAL_RESULT_HTML,
         )
         results = uitslagen_service.search_results("erik")
@@ -208,7 +218,7 @@ class TestUitslagenServiceSearch:
             </div>
         </body></html>
         """
-        requests_mock.get("https://example.test/zoek.html", text=unavailable_html)
+        requests_mock.get("https://example.test/results.php", text=unavailable_html)
         with pytest.raises(APIError) as excinfo:
             uitslagen_service.search_results("erik")
         assert excinfo.value.status_code == 503
@@ -217,7 +227,7 @@ class TestUitslagenServiceSearch:
         self, uitslagen_service, app_context, requests_mock
     ):
         requests_mock.get(
-            "https://example.test/zoek.html",
+            "https://example.test/results.php",
             exc=requests.exceptions.Timeout,
         )
         with pytest.raises(APIError) as excinfo:
@@ -227,6 +237,6 @@ class TestUitslagenServiceSearch:
     def test_search_handles_http_error(
         self, uitslagen_service, app_context, requests_mock
     ):
-        requests_mock.get("https://example.test/zoek.html", status_code=502)
+        requests_mock.get("https://example.test/results.php", status_code=502)
         with pytest.raises(APIError):
             uitslagen_service.search_results("erik")

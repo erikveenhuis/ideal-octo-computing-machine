@@ -16,7 +16,7 @@ from services.uitslagen_service import UitslagenService
 from .fixtures import load_fixture
 
 
-_BASE_URL = "https://example.test/zoek.html"
+_BASE_URL = "https://example.test/results.php"
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ class TestUrlAndValidation:
     def test_build_search_url_url_encodes_spaces(self, service):
         url = service._build_search_url("erik veenhuis")
         assert "naam=erik+veenhuis" in url
-        assert url.endswith("&gbjr=#")
+        assert "gbjr=" in url and "exct=" in url and "next=" in url
 
     def test_build_search_url_encodes_special_chars(self, service):
         url = service._build_search_url("O'Connor & Co")

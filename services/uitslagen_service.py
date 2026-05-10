@@ -1,7 +1,9 @@
 """Service for interacting with Uitslagen.nl API."""
+import json
+import re
 import time
 import urllib.parse
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 
 from bs4 import BeautifulSoup
 from flask import current_app
@@ -20,6 +22,8 @@ class UitslagenService:
         self.base_url = base_url
         self.timeout = timeout
         self.source = "Uitslagen.nl"
+        # `results.php` paginates server-side; cap to avoid unbounded requests.
+        self._max_search_pages = 15
 
     def search_results(self, name: str) -> List[Dict[str, Any]]:
         """
@@ -36,23 +40,35 @@ class UitslagenService:
             APIError: If API request fails
         """
         start_time = time.time()
+        last_request_url = self.base_url
 
         try:
             # Validate and sanitize input
             name = self._validate_name(name)
 
-            # Build request URL
-            url = self._build_search_url(name)
+            results: List[Dict[str, Any]] = []
+            next_token: Optional[str] = ""
+            page = 0
 
-            # Execute request
-            response = self._make_request(url)
-
-            # Parse results
-            results = self._parse_response(response.text)
+            while page < self._max_search_pages:
+                url = self._build_search_url(name, next_token)
+                last_request_url = url
+                response = self._make_request(url)
+                payload = self._decode_response_payload(response.text)
+                html_content = (
+                    payload.get("html", "") if isinstance(payload, dict) else str(payload)
+                )
+                results.extend(self._parse_response_html(html_content))
+                if not isinstance(payload, dict):
+                    break
+                next_token = payload.get("next") or None
+                if next_token in (None, ""):
+                    break
+                page += 1
 
             # Log successful completion
             duration = time.time() - start_time
-            log_api_request(self.source, url, duration)
+            log_api_request(self.source, last_request_url, duration)
             current_app.logger.info(
                 f"Successfully retrieved {len(results)} results from {self.source}"
             )
@@ -60,13 +76,13 @@ class UitslagenService:
             return results
 
         except requests.exceptions.Timeout as exc:
-            log_api_error(self.source, "Request timeout", url)
+            log_api_error(self.source, "Request timeout", last_request_url)
             raise APIError(
                 f"Timeout while fetching data from {self.source}",
                 self.source, APIConstants.HTTP_TIMEOUT
             ) from exc
         except requests.exceptions.RequestException as e:
-            log_api_error(self.source, str(e), url)
+            log_api_error(self.source, str(e), last_request_url)
             raise APIError(
                 f"Error fetching data from {self.source}",
                 self.source, APIConstants.HTTP_INTERNAL_ERROR
@@ -79,10 +95,25 @@ class UitslagenService:
             raise ValidationError("Name cannot be empty", "name")
         return clamped_name
 
-    def _build_search_url(self, name: str) -> str:
-        """Build the search URL for the given name."""
-        encoded_name = urllib.parse.quote_plus(name)
-        return f"{self.base_url}?naam={encoded_name}&gbjr=#"
+    def _build_search_url(self, name: str, next_token: Optional[str] = None) -> str:
+        """Build the ``results.php`` URL (JSON API used by the site search)."""
+        params = [
+            ("naam", name),
+            ("gbjr", ""),
+            ("exct", ""),
+            ("next", next_token or ""),
+        ]
+        return f"{self.base_url}?{urllib.parse.urlencode(params)}"
+
+    def _decode_response_payload(self, body: str) -> Any:
+        """Decode the upstream body: JSON (``results.php``) or legacy raw HTML."""
+        stripped = body.strip()
+        if stripped.startswith("{"):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+        return stripped
 
     def _make_request(self, url: str) -> requests.Response:
         """Make HTTP request to the API."""
@@ -96,7 +127,7 @@ class UitslagenService:
         response.raise_for_status()
         return response
 
-    def _parse_response(self, html_content: str) -> List[Dict[str, Any]]:
+    def _parse_response_html(self, html_content: str) -> List[Dict[str, Any]]:
         """Parse HTML response and extract results."""
         soup = BeautifulSoup(html_content, 'lxml')
 
@@ -122,6 +153,22 @@ class UitslagenService:
 
         return results
 
+    @staticmethod
+    def _split_event_header(event_text: str) -> Optional[Tuple[str, str]]:
+        """Parse event line into (date YYYY-MM-DD, event name)."""
+        compact = " ".join(event_text.replace("\xa0", " ").split())
+        iso_date_name = re.match(
+            r"^(\d{4}-\d{2}-\d{2})\s+(.+)$", compact
+        )
+        if iso_date_name:
+            return iso_date_name.group(1), iso_date_name.group(2).strip()
+        dmy_name = re.match(r"^(\d{2}-\d{2}-\d{4})\s+(.+)$", compact)
+        if dmy_name:
+            dd, mm, yyyy = dmy_name.group(1).split("-")
+            name = dmy_name.group(2).strip()
+            return f"{yyyy}-{mm}-{dd}", name
+        return None
+
     def _check_service_availability(self, soup: BeautifulSoup) -> None:
         """Check if the service is temporarily unavailable."""
         error_message = soup.find('div', style=lambda x: x and 'background-color:#ffcccc' in x)
@@ -141,8 +188,10 @@ class UitslagenService:
 
     def _find_result_sections(self, soup: BeautifulSoup) -> List:
         """Find all result sections in the HTML."""
-        # Try primary selector
+        # Current site uses ``zk-kaderx`` inside cards; older markup used ``zk-kader``.
         result_sections = soup.find_all('div', class_='zk-kader')
+        if not result_sections:
+            result_sections = soup.find_all('div', class_='zk-kaderx')
 
         if not result_sections:
             # Try alternative selectors
@@ -157,6 +206,21 @@ class UitslagenService:
                 )
 
         return result_sections
+
+    @staticmethod
+    def _find_event_title_cell(event_row):
+        """Return the ``th`` that holds the date and event title."""
+        headers = event_row.find_all('th')
+        for th in headers:
+            colspan = th.get('colspan')
+            if colspan is None or colspan == '':
+                continue
+            try:
+                if int(str(colspan)) >= 5:
+                    return th
+            except ValueError:
+                continue
+        return headers[-1] if headers else None
 
     def _parse_result_section(self, section) -> Optional[Dict[str, Any]]:
         """Parse a single result section."""
@@ -186,20 +250,21 @@ class UitslagenService:
             current_app.logger.debug("Skipping section: No event row found")
             return None
 
-        event_th = event_row.find('th', colspan='6')
+        event_th = self._find_event_title_cell(event_row)
         if not event_th:
             current_app.logger.debug("Skipping section: No event details found")
             return None
 
-        event_text = event_th.text.strip()
-        event_parts = event_text.split(' ', 1)
-        if len(event_parts) != 2:
+        event_text = event_th.get_text(separator=' ', strip=True)
+        parsed = self._split_event_header(event_text)
+        if not parsed:
             current_app.logger.debug(f"Skipping section: Invalid event format: {event_text}")
             return None
 
+        date_str, event_name = parsed
         return {
-            'date': event_parts[0],
-            'name': event_parts[1]
+            'date': date_str,
+            'name': event_name
         }
 
     def _extract_race_info(self, section) -> Optional[Dict[str, str]]:
@@ -223,8 +288,8 @@ class UitslagenService:
         classification_rows = section.find_all('tr')
 
         for row in classification_rows:
-            # Skip header rows
-            if 'class' in row.attrs and row['class'] in ['zk-evnm', 'db', 'lb']:
+            row_classes = set(row.get('class') or [])
+            if row_classes & {'zk-evnm', 'db', 'lb'}:
                 continue
 
             cells = row.find_all('td')

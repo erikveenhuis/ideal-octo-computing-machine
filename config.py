@@ -29,8 +29,11 @@ class Config:
     GITHUB_WEBHOOK_SECRET = os.environ.get('GITHUB_WEBHOOK_SECRET')
 
     # External API Configuration
-    SPORTHIVE_API_BASE = 'https://eventresults-api.sporthive.com/api/events'
-    UITSLAGEN_BASE_URL = 'https://uitslagen.nl/zoek.html'
+    # Speedhive serves a valid TLS certificate; requests must send
+    # ``Origin: https://sporthive.com`` or the gateway returns 404 for API paths.
+    SPORTHIVE_API_BASE = 'https://eventresults-api.speedhive.com/api/events'
+    # Uitslagen.nl replaced static zoek.html with results.php (JSON + HTML fragments).
+    UITSLAGEN_BASE_URL = 'https://uitslagen.nl/results.php'
 
     # Request Settings
     REQUEST_TIMEOUT = 30
@@ -182,7 +185,7 @@ class APIConstants:
 class URLPatterns:
     """URL patterns for external services."""
 
-    UITSLAGEN_SEARCH_PATTERN = "?naam={name}&gbjr=#"
+    UITSLAGEN_SEARCH_PATTERN = "?naam={name}&gbjr=&exct=&next="
     SPORTHIVE_SEARCH_PATTERN = "/search?q={name}"
 
 # File extensions
