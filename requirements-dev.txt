@@ -18,7 +18,7 @@ sphinx>=9.1.0
 sphinx-rtd-theme>=3.1.0
 
 # Type Checking
-mypy>=1.20.2
+mypy>=2.1.0
 types-requests>=2.33.0.20260503
 
 # Security
