@@ -225,16 +225,18 @@ def test_export_pdf_real_fixture_round_trip(client):
 
 def test_export_pdf_default_style_is_forex(client):
     """Omitting ``style`` falls back to forex behaviour: 245 x 330 mm page
-    (same media as plexiglas_black), no /Separation /White, no TrimBox header."""
+    (same media as plexiglas_black), no /Separation /White, and the
+    same TrimBox metadata as plexi (forex and plexi were aligned so a
+    strict prepress validator sees a single contract per style).
+    """
     response = client.post("/export-pdf", json={"svg": _SYNTHETIC_SVG})
     assert response.status_code == 200
     assert response.headers["X-PDF-Style"] == "forex"
     assert response.headers["X-PDF-Page-Width-mm"] == "245.00"
     assert response.headers["X-PDF-Page-Height-mm"] == "330.00"
-    # Forex never writes a TrimBox, so the trim headers must not be set.
-    assert "X-PDF-Trim-Width-mm" not in response.headers
-    assert "X-PDF-Trim-Height-mm" not in response.headers
-    assert "X-PDF-Trim-Bleed-mm" not in response.headers
+    assert response.headers["X-PDF-Trim-Width-mm"] == "225.00"
+    assert response.headers["X-PDF-Trim-Height-mm"] == "310.00"
+    assert response.headers["X-PDF-Trim-Bleed-mm"] == "10.00"
 
 
 def test_export_pdf_plexiglas_black_round_trip(client):

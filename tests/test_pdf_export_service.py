@@ -651,11 +651,26 @@ def test_set_white_spot_recursive_preserves_paint_sides():
     assert neither.fillColor is None
 
 
-def test_build_pdf_forex_style_has_no_white_separation_or_trimbox(export_service):
-    """The forex pipeline must NOT regress to plexi behaviour: no
-    /Separation /White, no TrimBox written. This pins the back-compat
-    guarantee for clients still on the forex contract."""
-    from services.pdf_export_service import STYLE_FOREX
+def test_build_pdf_forex_style_emits_aligned_structure(export_service):
+    """The forex pipeline must produce a PDF that is structurally
+    aligned with plexiglas_black:
+
+      * One spot colour (Thrucut) — no /Separation /White on forex
+      * Two OCGs (Artwork, Thrucut) — every plate sits inside its own
+        named layer so prepress validators see one layer per plate
+      * TrimBox at the standard 10 mm bleed — same 225 x 310 mm trim
+        the plexi pipeline writes
+
+    Prior versions wrote no TrimBox on forex and skipped the Artwork
+    OCG, which made the two style outputs structurally divergent and
+    failed strict portal validators (Print.com Studio in particular).
+    """
+    from services.pdf_export_service import (
+        ARTWORK_OCG_NAME,
+        PLEXI_TRIM_INSET_MM,
+        STYLE_FOREX,
+        THRUCUT_SPOT_NAME,
+    )
 
     result = export_service.build_pdf(ExportRequest(
         svg_text=_SYNTHETIC_SVG,
@@ -663,9 +678,12 @@ def test_build_pdf_forex_style_has_no_white_separation_or_trimbox(export_service
         style=STYLE_FOREX,
     ))
     assert result.style == STYLE_FOREX
-    assert result.trim_box_mm is None, (
-        f"forex must not write a TrimBox; got {result.trim_box_mm}"
-    )
+    assert result.trim_box_mm == (
+        PLEXI_TRIM_INSET_MM,
+        PLEXI_TRIM_INSET_MM,
+        PAGE_TARGET_MM[0] - PLEXI_TRIM_INSET_MM,
+        PAGE_TARGET_MM[1] - PLEXI_TRIM_INSET_MM,
+    ), f"forex must align on the plexi trim contract; got {result.trim_box_mm}"
 
     seps = _find_separations(result.pdf_bytes)
     assert any("Thrucut" in body for body in seps), (
@@ -675,13 +693,21 @@ def test_build_pdf_forex_style_has_no_white_separation_or_trimbox(export_service
         f"forex must NOT emit /Separation /White; got: {seps}"
     )
 
-    # PyMuPDF: trimbox defaults to mediabox when no /TrimBox is written.
+    ocgs = _find_ocgs(result.pdf_bytes)
+    ocg_bodies = " ".join(ocgs)
+    assert f"({THRUCUT_SPOT_NAME})" in ocg_bodies, (
+        f"missing Thrucut OCG in: {ocgs}"
+    )
+    assert f"({ARTWORK_OCG_NAME})" in ocg_bodies, (
+        f"missing Artwork OCG (process-CMYK plate) in: {ocgs}"
+    )
+
     doc = pymupdf.open(stream=result.pdf_bytes, filetype="pdf")
     try:
         page = doc[0]
-        assert page.trimbox == page.mediabox, (
-            "forex must leave TrimBox == MediaBox (no plexi metadata leak)"
-        )
+        assert abs(page.trimbox.width * 25.4 / 72 - 225.0) < 0.05
+        assert abs(page.trimbox.height * 25.4 / 72 - 310.0) < 0.05
+        assert abs(page.trimbox.x0 * 25.4 / 72 - PLEXI_TRIM_INSET_MM) < 0.05
     finally:
         doc.close()
 
@@ -719,9 +745,17 @@ def test_build_pdf_plexiglas_black_style_emits_full_geometry(export_service):
         f"plexi must emit /Separation /White; got: {seps}"
     )
 
+    from services.pdf_export_service import ARTWORK_OCG_NAME, WHITE_SPOT_NAME
+
     ocgs = _find_ocgs(result.pdf_bytes)
     ocg_bodies = ' '.join(ocgs)
     assert "(Thrucut)" in ocg_bodies, f"missing Thrucut OCG: {ocgs}"
+    assert f"({WHITE_SPOT_NAME})" in ocg_bodies, (
+        f"missing White OCG (basemap on /Separation /White): {ocgs}"
+    )
+    assert f"({ARTWORK_OCG_NAME})" in ocg_bodies, (
+        f"missing Artwork OCG (process-CMYK overlay) in: {ocgs}"
+    )
 
     doc = pymupdf.open(stream=result.pdf_bytes, filetype="pdf")
     try:

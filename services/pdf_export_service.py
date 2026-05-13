@@ -94,6 +94,12 @@ THRUCUT_SPOT_CMYK: Tuple[float, float, float, float] = (0.0, 100.0, 0.0, 0.0)
 #: print shops look for this exact spot name to identify that plate.
 WHITE_SPOT_NAME: str = "White"
 
+#: OCG name that wraps the *process-CMYK* visible art (Route, Markers,
+#: Overlay, Tekst_laag). Kept separate from the spot-colour OCGs so each
+#: ``/Separation`` plate is delivered on its own layer — a common
+#: requirement of strict prepress validators (e.g. Print.com Studio).
+ARTWORK_OCG_NAME: str = "Artwork"
+
 #: CMYK ink levels for the on-screen / proof representation of the White
 #: spot. Cyan is used here so the White plate is visually distinct from
 #: the Thrucut plate (which proofs as magenta) when both separations are
@@ -456,8 +462,32 @@ class PDFExportService:
             title="GPX route export — Thrucut",
         )
 
-        merged = _merge_with_ocg(
-            art_pdf, thrucut_pdf, ocg_name=THRUCUT_SPOT_NAME
+        # Forex carries a single spot (Thrucut). The visible CMYK art is
+        # wrapped in its own ``Artwork`` OCG so the structural pattern
+        # matches the plexiglas_black pipeline: every named layer in the
+        # output contains the content of exactly one printable plate.
+        merged = _merge_plates_with_ocgs(
+            base_w_pt=prep["page_w_pt"],
+            base_h_pt=prep["page_h_pt"],
+            plates=[
+                (art_pdf, ARTWORK_OCG_NAME),
+                (thrucut_pdf, THRUCUT_SPOT_NAME),
+            ],
+        )
+
+        # Write the same TrimBox metadata as plexi so a strict prepress
+        # validator sees an explicit 10 mm bleed margin on both styles.
+        # Forex and plexi share the 245 x 330 mm media + 225 x 310 mm
+        # trim convention, so the geometry derivation is identical.
+        page_w_mm, page_h_mm = req.page_mm
+        trim_l = PLEXI_TRIM_INSET_MM
+        trim_b = PLEXI_TRIM_INSET_MM
+        trim_r = page_w_mm - PLEXI_TRIM_INSET_MM
+        trim_t = page_h_mm - PLEXI_TRIM_INSET_MM
+        merged = _set_page_trimbox_mm(
+            merged,
+            page_index=0,
+            trim_mm=(trim_l, trim_b, trim_r, trim_t),
         )
 
         return ExportResult(
@@ -465,7 +495,7 @@ class PDFExportService:
             page_size_mm=req.page_mm,
             thrucut_size_mm=THRUCUT_TARGET_MM,
             style=STYLE_FOREX,
-            trim_box_mm=None,
+            trim_box_mm=(trim_l, trim_b, trim_r, trim_t),
         )
 
     # ---------------------------------------------------------------
@@ -520,12 +550,22 @@ class PDFExportService:
             title="GPX route export — Thrucut plate",
         )
 
-        merged = _merge_plexi_plates(
+        # Plexi layers (z-order bottom -> top):
+        #   1. Basemap on /Separation /White  -> White OCG
+        #   2. Process-CMYK overlay (Route, Markers, Tekst_laag)
+        #      -> Artwork OCG (distinct from White so the spot-only
+        #         plate isn't conflated with process colours; this is
+        #         what strict prepress validators look for)
+        #   3. Cut path on /Separation /Thrucut -> Thrucut OCG
+        plates: list[Tuple[bytes, str]] = [(white_pdf, WHITE_SPOT_NAME)]
+        if rgb_overlay_pdf is not None:
+            plates.append((rgb_overlay_pdf, ARTWORK_OCG_NAME))
+        plates.append((thrucut_pdf, THRUCUT_SPOT_NAME))
+
+        merged = _merge_plates_with_ocgs(
             base_w_pt=prep["page_w_pt"],
             base_h_pt=prep["page_h_pt"],
-            white_pdf=white_pdf,
-            rgb_overlay_pdf=rgb_overlay_pdf,
-            thrucut_pdf=thrucut_pdf,
+            plates=plates,
         )
 
         # Compute and write the TrimBox AFTER the merge — the PDF must
@@ -1046,114 +1086,57 @@ def _render_drawing_to_pdf(
 # PyMuPDF merge + OCG
 # ---------------------------------------------------------------------------
 
-def _merge_with_ocg(art_pdf: bytes, thrucut_pdf: bytes, *, ocg_name: str) -> bytes:
-    """Stamp ``thrucut_pdf`` onto page 1 of ``art_pdf`` inside an OCG named
-    ``ocg_name``. Returns the merged PDF as bytes.
-
-    PyMuPDF's ``Page.show_pdf_page`` imports the source page as a Form
-    XObject; passing ``oc=`` wraps that XObject reference inside the
-    target document's named OCG so the cut layer becomes a togglable
-    "Thrucut" layer in PDF viewers (Acrobat, Preview, Illustrator) while
-    still producing the spot-colour separation on the cutter plate.
-    """
-    pymupdf = _get_pymupdf()
-    art_doc = pymupdf.open(stream=art_pdf, filetype="pdf")
-    thrucut_doc = pymupdf.open(stream=thrucut_pdf, filetype="pdf")
-    try:
-        ocg_xref = art_doc.add_ocg(ocg_name, on=True, intent="Design")
-        page = art_doc[0]
-        page.show_pdf_page(
-            page.rect, thrucut_doc, 0,
-            overlay=True,
-            oc=ocg_xref,
-        )
-        return art_doc.tobytes()
-    finally:
-        thrucut_doc.close()
-        art_doc.close()
-
-
-def _merge_plexi_plates(
+def _merge_plates_with_ocgs(
     *,
     base_w_pt: float,
     base_h_pt: float,
-    white_pdf: bytes,
-    rgb_overlay_pdf: Optional[bytes],
-    thrucut_pdf: bytes,
+    plates: list[Tuple[bytes, str]],
 ) -> bytes:
-    """Build the Plexi Black single-page PDF by stamping every plate
-    onto a fresh page sized ``(base_w_pt, base_h_pt)``.
+    """Stamp a list of per-plate PDFs onto a fresh empty page, each
+    inside its own named Optional Content Group.
 
-    Stacking order (z-down -> z-up):
+    ``plates`` is an ordered list of ``(pdf_bytes, ocg_name)`` tuples;
+    z-order matches list order (first item is the bottom plate). Each
+    OCG is created via ``add_ocg(ocg_name, on=True, intent="Design")``
+    so production tools (Acrobat, Illustrator, Enfocus PitStop) see
+    every plate as a separate togglable layer.
 
-      1. Basemap plate (White spot) -> visible-art OCG
-      2. RGB overlay plate (Route, Markers, Overlay) -> SAME visible-art OCG
-      3. Thrucut plate (cut path) -> Thrucut OCG
+    All input PDFs must have been rendered with the same canvas CTM at
+    the same page size; ``show_pdf_page`` imports each as a Form
+    XObject and 1:1 stamps it into ``page.rect`` so the geometry
+    survives unchanged. The base page is intentionally empty (no
+    content piggybacked from one of the plates) so every visible paint
+    operator sits behind an OCG — the structural rule the forex and
+    plexi pipelines both rely on.
 
-    The basemap and RGB overlay share a single OCG named after
-    ``WHITE_SPOT_NAME`` because production tools (Acrobat, Illustrator,
-    Enfocus PitStop) treat "the visible art" as a single togglable
-    layer; the original Adobe Illustrator reference (retired from git
-    in favour of ``tests/fixtures/plexi_pdf_factory.py``) likewise
-    kept both basemap (~28k spot-colour ops) and overlay text (the
-    ``0 0 0 rg`` device-RGB ENSCHEDE / 12 april / 42,2 km labels) inside
-    a single ``Laag 2`` OCG.
-
-    All plates are imported as Form XObjects via ``show_pdf_page``;
-    ``oc=`` attaches each XObject reference to the named OCG so the
-    layer-toggle still works even though one OCG now spans two plates.
-
-    ``rgb_overlay_pdf`` is optional: if the source SVG has no overlay
-    layers (Route / Markers / Overlay etc.) the caller passes ``None``
-    and that stamp is skipped.
-
-    The resulting PDF carries a fresh empty page sized exactly
-    ``(base_w_pt, base_h_pt)`` so the merged geometry matches what the
-    per-plate renderer assumed; we don't piggyback on any source PDF
-    as the base because that would conflate one plate's content with
-    the page itself, leaving it un-OCG-wrapped.
+    Duplicate OCG names in the input are folded into a single OCG xref;
+    this is what allows the same logical layer (e.g. "White") to span
+    multiple imported plates if a caller ever splits one — current
+    callers always use distinct names per plate.
     """
     pymupdf = _get_pymupdf()
     out = pymupdf.open()
     page = out.new_page(width=base_w_pt, height=base_h_pt)
 
-    white_doc = pymupdf.open(stream=white_pdf, filetype="pdf")
-    rgb_doc = (
-        pymupdf.open(stream=rgb_overlay_pdf, filetype="pdf")
-        if rgb_overlay_pdf is not None
-        else None
-    )
-    thrucut_doc = pymupdf.open(stream=thrucut_pdf, filetype="pdf")
+    ocg_xrefs: dict[str, int] = {}
+    src_docs: list = []
     try:
-        white_ocg = out.add_ocg(WHITE_SPOT_NAME, on=True, intent="Design")
-        thrucut_ocg = out.add_ocg(THRUCUT_SPOT_NAME, on=True, intent="Design")
-
-        # Basemap (White spot) underneath, RGB overlay on top of it,
-        # Thrucut on top of everything. All three source PDFs were
-        # rendered with the same canvas CTM at the same page size, so
-        # 1:1 stamps into ``page.rect`` preserve the geometry exactly.
-        page.show_pdf_page(
-            page.rect, white_doc, 0,
-            overlay=False,
-            oc=white_ocg,
-        )
-        if rgb_doc is not None:
+        for i, (pdf_bytes, ocg_name) in enumerate(plates):
+            if ocg_name not in ocg_xrefs:
+                ocg_xrefs[ocg_name] = out.add_ocg(
+                    ocg_name, on=True, intent="Design",
+                )
+            src = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+            src_docs.append(src)
             page.show_pdf_page(
-                page.rect, rgb_doc, 0,
-                overlay=True,
-                oc=white_ocg,
+                page.rect, src, 0,
+                overlay=(i > 0),
+                oc=ocg_xrefs[ocg_name],
             )
-        page.show_pdf_page(
-            page.rect, thrucut_doc, 0,
-            overlay=True,
-            oc=thrucut_ocg,
-        )
         return out.tobytes()
     finally:
-        thrucut_doc.close()
-        if rgb_doc is not None:
-            rgb_doc.close()
-        white_doc.close()
+        for src in src_docs:
+            src.close()
         out.close()
 
 

@@ -1,6 +1,6 @@
 """Tests for ``services.gpx_processing_service``.
 
-These tests use the real ``static/test_route.gpx`` file plus small synthetic
+These tests use the real ``tests/files/test_route.gpx`` file plus small synthetic
 GPX strings to exercise the validation, parsing, statistics, quality
 assessment and Douglas-Peucker simplification paths.
 """
@@ -16,7 +16,7 @@ from services.gpx_processing_service import GPXProcessingService
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SAMPLE_GPX_PATH = REPO_ROOT / "static" / "test_route.gpx"
+SAMPLE_GPX_PATH = REPO_ROOT / "tests" / "files" / "test_route.gpx"
 
 
 # ---------------------------------------------------------------------------
