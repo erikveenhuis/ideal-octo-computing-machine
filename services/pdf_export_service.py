@@ -280,14 +280,14 @@ class PDFExportService:
         else:
             result = self._build_forex(req, prep)
 
-        # Final pass: scrub ReportLab's hardcoded DeviceRGB default-
-        # state ops (``0 0 0 RG`` / ``0 0 0 rg``) on every Form XObject
-        # and page content stream. Combined with
-        # ``_convert_rgb_to_cmyk_recursive``, this guarantees the
-        # rendered PDF carries zero DeviceRGB content operators —
-        # every visible-art paint is DeviceCMYK or a Separation spot.
-        # See ``_scrub_reportlab_rgb_defaults`` for why the per-paint
-        # walker alone isn't sufficient.
+        # Final pass: scrub ReportLab artefacts from Form XObjects and
+        # page ``/Contents`` streams — (1) hardcoded DeviceRGB default-
+        # state ops ``0 0 0 RG`` / ``0 0 0 rg`` → CMYK black, (2) empty
+        # ``BT … Tf … TL ET`` preamble blocks ReportLab emits even when no
+        # text is painted. Combined with ``_convert_rgb_to_cmyk_recursive``
+        # this removes DeviceRGB paint ops and PDF text-markup noise that
+        # strict upload validators reject before outlines are applied.
+        # See ``_scrub_reportlab_paint_streams``.
         return ExportResult(
             pdf_bytes=_scrub_reportlab_rgb_defaults(result.pdf_bytes),
             page_size_mm=result.page_size_mm,
@@ -1162,41 +1162,51 @@ _REPORTLAB_RGB_DEFAULT_RE = re.compile(
 )
 
 
+#: ReportLab ``renderPDF`` emits these **empty** text blocks even when the
+#: Drawing carries zero ``drawString`` calls — they establish font state
+#: before vector ops run. ``bad.pdf`` (upload rejection) carried six such
+#: blocks; ``good.pdf`` (after outlines / Studio acceptance) carried zero.
+#: Stripping them removes ``BT`` / ``Tf`` markers strict portals flag while
+#: leaving real ``Tj`` / ``TJ`` blocks untouched.
+_REPORTLAB_EMPTY_TEXT_STATE_BLOCK_RE = re.compile(
+    rb"(?<![A-Za-z0-9_])BT(?![A-Za-z0-9_])\s*"
+    rb"/F\d+\s+\d+(?:\.\d+)?\s+Tf\s+\d+(?:\.\d+)?\s+TL\s*"
+    rb"ET(?![A-Za-z0-9_])"
+)
+
+
 def _replace_rgb_default(match: "re.Match[bytes]") -> bytes:
     op = match.group(1)
     return b"0 0 0 1 K" if op == b"RG" else b"0 0 0 1 k"
 
 
-def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
-    """Rewrite ReportLab's hardcoded ``0 0 0 RG`` / ``0 0 0 rg`` default-
-    state ops to their DeviceCMYK equivalents (``0 0 0 1 K`` /
-    ``0 0 0 1 k``) on every paint-bearing stream in ``pdf_bytes``.
+def _scrub_reportlab_paint_streams(pdf_bytes: bytes) -> bytes:
+    """Normalize ReportLab-rendered streams for press / web-upload validators.
 
-    ``Color(0, 0, 0, 1)`` and ``CMYKColor(0, 0, 0, 1)`` both render as
-    pure black, so the rewrite does not change visible output. The pass
-    only inspects:
+    Two mechanical transforms, neither of which changes stroked/filled
+    geometry:
 
-      - Form XObjects (``/Subtype /Form``) — that's where
-        ``page.show_pdf_page`` parks every imported plate (Thrucut for
-        forex; White, RGB-overlay, Thrucut for plexi).
-      - Page-level content streams — that's where the *base* PDF for a
-        ``show_pdf_page`` merge keeps its own content; the forex
-        pipeline's art_pdf, for example, ends up at page level after
-        ``art_doc[0].show_pdf_page(thrucut_doc, …)`` because art_doc is
-        the merge target rather than an imported XObject.
+    1. Rewrite hardcoded ``0 0 0 RG`` / ``0 0 0 rg`` defaults to CMYK
+       black — see ``_REPORTLAB_RGB_DEFAULT_RE``.
+    2. Strip empty ``BT … Tf … TL ET`` preamble blocks ReportLab emits even
+       when no text is painted — see ``_REPORTLAB_EMPTY_TEXT_STATE_BLOCK_RE``.
+       Real text blocks that contain ``Tm``, ``Tj``, ``TJ``, ``'``, ``"``,
+       etc. are left intact.
 
-    Image / font streams are skipped (they don't carry a
-    ``/Subtype /Form`` and aren't a page's /Contents), so the regex
-    can't accidentally rewrite a byte sequence inside a JPEG or a
-    Type1 font program.
+    Only Form XObjects (imported plates) and page ``/Contents`` streams
+    are touched — same surface as the RGB scrub historically used.
 
-    Stream length is updated automatically by PyMuPDF's
-    ``update_stream``; callers don't need to recompute /Length.
+    Stream ``/Length`` is updated by PyMuPDF's ``update_stream``.
     """
     pymupdf = _get_pymupdf()
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         rewrote = False
+
+        def scrub_stream(data: bytes) -> bytes:
+            out = _REPORTLAB_RGB_DEFAULT_RE.sub(_replace_rgb_default, data)
+            out = _REPORTLAB_EMPTY_TEXT_STATE_BLOCK_RE.sub(b"", out)
+            return out
 
         # Form XObjects: imported plates from show_pdf_page.
         for xref in range(1, doc.xref_length()):
@@ -1212,16 +1222,12 @@ def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
                 continue
             if not data:
                 continue
-            new_data = _REPORTLAB_RGB_DEFAULT_RE.sub(
-                _replace_rgb_default, data
-            )
+            new_data = scrub_stream(data)
             if new_data != data:
                 doc.update_stream(xref, new_data, compress=True)
                 rewrote = True
 
-        # Page-level content streams: the base PDF in a show_pdf_page
-        # merge keeps its content here (e.g. forex art_pdf becomes the
-        # base, so its ReportLab-emitted preamble lives at page level).
+        # Page-level content streams.
         for page in doc:
             try:
                 cs_xrefs = page.get_contents()
@@ -1234,9 +1240,7 @@ def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
                     continue
                 if not data:
                     continue
-                new_data = _REPORTLAB_RGB_DEFAULT_RE.sub(
-                    _replace_rgb_default, data
-                )
+                new_data = scrub_stream(data)
                 if new_data != data:
                     doc.update_stream(xref, new_data, compress=True)
                     rewrote = True
@@ -1246,6 +1250,11 @@ def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
         return pdf_bytes
     finally:
         doc.close()
+
+
+def _scrub_reportlab_rgb_defaults(pdf_bytes: bytes) -> bytes:
+    """Backward-compatible alias for :func:`_scrub_reportlab_paint_streams`."""
+    return _scrub_reportlab_paint_streams(pdf_bytes)
 
 
 def _set_page_trimbox_mm(
