@@ -404,14 +404,12 @@ class PDFExportService:
         target_w_pt = _mm_to_pt(THRUCUT_TARGET_MM[0])
         target_h_pt = _mm_to_pt(THRUCUT_TARGET_MM[1])
 
-        # Per-axis scale: the medal-overlay SVG embeds the Thrucut at a
-        # different aspect ratio than 225/310 (its bbox is roughly
-        # 0.7506 in source units while the requested cut is 0.7258).
-        # We MUST hit 225 x 310 mm exactly on the cutter plate, so we
-        # scale X and Y independently. The basemap and overlay artwork
-        # follow the same scale, which preserves what the user sees on
-        # the canvas (where the same non-uniform aspect is already
-        # baked into the on-screen render).
+        # Per-axis scale: the Thrucut bbox in SVG user units rarely matches
+        # 225×310 mm exactly. We scale X and Y independently so the cut plate
+        # lands at THRUCUT_TARGET_MM on press. The browser overlay preview uses
+        # object-fit: contain (uniform medal scale); SVGRenderer applies the same
+        # rule before PDF, so basemap + medal geometry stay consistent through
+        # this CTM.
         scale_x = target_w_pt / bbox_w
         scale_y = target_h_pt / bbox_h
 
@@ -969,6 +967,17 @@ def _rgb_to_cmyk(
     r = max(0.0, min(1.0, r))
     g = max(0.0, min(1.0, g))
     b = max(0.0, min(1.0, b))
+
+    # Dark, low-chroma neutrals (common Mapbox label greys) split across CMY+K
+    # after naive conversion and read lighter / less bold on proof than pure K.
+    # Snap these to pure black before separation when saturation is negligible.
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    if mx > 1e-9:
+        chroma = mx - mn
+        if chroma <= 0.06 and mx <= 0.38:
+            r = g = b = 0.0
+
     k = 1.0 - max(r, g, b)
     if k >= 1.0 - 1e-9:
         return (0.0, 0.0, 0.0, 1.0)

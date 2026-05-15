@@ -69,7 +69,10 @@ class SVGExporter {
             const map = this.mapManager.getMap();
             await ExportUtilities.waitForMapReady(map);
             console.log('✅ Map ready');
-            
+
+            ExportUtilities.setEvalImportConfig(ExportUtilities.mergeImportConfigs(map.getStyle()));
+            try {
+
             // Get current map state
             const center = map.getCenter();
             const zoom = map.getZoom();
@@ -77,29 +80,27 @@ class SVGExporter {
             const pitch = map.getPitch();
             console.log('✅ Got map state');
             
-            // Get the actual canvas dimensions for more accurate projection
+            // Pixel viewport must match map.project() / map.unproject(): Mapbox uses
+            // transform.width/height (CSS px, may be fractional). clientWidth can
+            // differ slightly and causes PDF vs canvas drift.
             const mapCanvas = map.getCanvas();
-            
-            // FIXED: Get the actual displayed canvas size instead of internal canvas size
-            // The internal canvas might be different from what's displayed due to device pixel ratio
-            const canvasRect = mapCanvas.getBoundingClientRect();
-            const displayWidth = Math.round(canvasRect.width);
-            const displayHeight = Math.round(canvasRect.height);
+            const rect = mapCanvas.getBoundingClientRect();
+            const tr = map.transform;
+            const tw = tr && typeof tr.width === 'number' && tr.width > 0 ? tr.width : null;
+            const th = tr && typeof tr.height === 'number' && tr.height > 0 ? tr.height : null;
+            const canvasWidth = tw ?? (mapCanvas.clientWidth || Math.max(1, Math.round(rect.width)));
+            const canvasHeight = th ?? (mapCanvas.clientHeight || Math.max(1, Math.round(rect.height)));
             const internalWidth = mapCanvas.width;
             const internalHeight = mapCanvas.height;
             
             console.log('✅ Got canvas dimensions');
-            console.log(`Canvas analysis - Display: ${displayWidth}x${displayHeight}, Internal: ${internalWidth}x${internalHeight}, Pixel ratio: ${window.devicePixelRatio || 1}`);
-            
-            // Use the display dimensions for the SVG to match what the user sees
-            const canvasWidth = displayWidth;
-            const canvasHeight = displayHeight;
+            console.log(`Canvas analysis - Layout: ${canvasWidth}x${canvasHeight}, Internal: ${internalWidth}x${internalHeight}, Pixel ratio: ${window.devicePixelRatio || 1}`);
             
             // FIXED: Use actual canvas dimensions without scaling to match screen view
             // The scaling factor was making the export too large and zoomed in
             const exportSettings = window.exportSettings || { scalingFactor: 1.0 };
             
-            console.log(`Canvas dimensions - Using: ${canvasWidth}x${canvasHeight} (display size), Factor: 1.0x (no scaling)`);
+            console.log(`Canvas dimensions - Using: ${canvasWidth}x${canvasHeight} (CSS layout size), Factor: 1.0x (no scaling)`);
             
             // FIXED: Use the map's actual viewport bounds instead of calculating from center
             // This ensures we capture the exact area visible on screen, including any rotation
@@ -109,26 +110,28 @@ class SVGExporter {
             // CRITICAL DIAGNOSTIC: Check if bounds match visual viewport
             console.log('=== 🔍 BOUNDS vs VISUAL VIEWPORT ANALYSIS ===');
             
-            // Get the visual viewport corners by projecting screen coordinates to lat/lng
-            const mapContainer = map.getContainer();
-            const containerRect = mapContainer.getBoundingClientRect();
-            
-            // Get lat/lng coordinates of the four corners of the visual canvas
-            const topLeft = map.unproject([0, 0]);
-            const topRight = map.unproject([canvasWidth, 0]);
-            const bottomLeft = map.unproject([0, canvasHeight]);
-            const bottomRight = map.unproject([canvasWidth, canvasHeight]);
-            
-            // Calculate the actual visual bounds
+            // Axis-aligned geographic bounds of the viewport: extrema must be
+            // taken over all four corners. Using only the left column for west,
+            // top row for north, etc. is wrong under bearing or pitch — a corner
+            // off that edge can reach farther north/south, stretching latSpan and
+            // making the vector export look vertically "zoomed out" vs the canvas.
+            const cornerLngLats = [
+                map.unproject([0, 0]),
+                map.unproject([canvasWidth, 0]),
+                map.unproject([canvasWidth, canvasHeight]),
+                map.unproject([0, canvasHeight]),
+            ];
+            const cornerLngs = cornerLngLats.map((p) => p.lng);
+            const cornerLats = cornerLngLats.map((p) => p.lat);
             const visualBounds = {
                 sw: {
-                    lng: Math.min(topLeft.lng, bottomLeft.lng),
-                    lat: Math.min(bottomLeft.lat, bottomRight.lat)
+                    lng: Math.min(...cornerLngs),
+                    lat: Math.min(...cornerLats),
                 },
                 ne: {
-                    lng: Math.max(topRight.lng, bottomRight.lng),
-                    lat: Math.max(topLeft.lat, topRight.lat)
-                }
+                    lng: Math.max(...cornerLngs),
+                    lat: Math.max(...cornerLats),
+                },
             };
             
             const programmaticBounds = {
@@ -152,16 +155,17 @@ class SVGExporter {
             console.log(`  SW difference: ${lngDiffSW.toFixed(1)}m lng, ${latDiffSW.toFixed(1)}m lat`);
             console.log(`  NE difference: ${lngDiffNE.toFixed(1)}m lng, ${latDiffNE.toFixed(1)}m lat`);
             
-            // Determine which bounds to use
-            const boundsToUse = visualBounds;
-            const usingVisualBounds = Math.abs(lngDiffSW) > 10 || Math.abs(latDiffSW) > 10 || Math.abs(lngDiffNE) > 10 || Math.abs(latDiffNE) > 10;
-            
-            if (usingVisualBounds) {
-                console.log('⚠️ SIGNIFICANT DIFFERENCE DETECTED - Using visual bounds instead of programmatic bounds');
-                console.log('   This should fix the zoom mismatch issue');
+            const boundsMismatchVsProgrammatic =
+                Math.abs(lngDiffSW) > 10 ||
+                Math.abs(latDiffSW) > 10 ||
+                Math.abs(lngDiffNE) > 10 ||
+                Math.abs(latDiffNE) > 10;
+            if (boundsMismatchVsProgrammatic) {
+                console.log('⚠️ Programmatic getBounds() differs from viewport-corner bounds (bearing/pitch/insets)');
             } else {
-                console.log('✅ Bounds match closely - Using programmatic bounds');
+                console.log('✅ Programmatic bounds align with viewport-corner bounds');
             }
+            console.log('   Projection always uses viewport-corner bounds for SVG/PDF parity with the canvas');
             
             console.log('=== END BOUNDS ANALYSIS ===');
             
@@ -375,7 +379,44 @@ class SVGExporter {
             
             console.log(`🔍 Found ${allLayerIds.length} total layers and ${allSourceLayers.size} source layers`);
             console.log(`Source layers: [${Array.from(allSourceLayers).join(', ')}]`);
-            
+
+            // Undifferentiated queryRenderedFeatures sometimes omits symbol-layer refs that
+            // still drew on the GL canvas (place_label neighbourhoods, etc.). Merge explicit
+            // per-symbol-layer queries; uniqueFeatures dedupes overlaps afterward.
+            const queryBBoxForSymbols =
+                useBoundsQueries !== false
+                    ? [
+                          [bounds.getSouthWest().lng, bounds.getSouthWest().lat],
+                          [bounds.getNorthEast().lng, bounds.getNorthEast().lat],
+                      ]
+                    : null;
+            const symbolLayerIdsWithText = allLayers
+                .filter((l) => l.type === 'symbol' && l.layout && l.layout['text-field'])
+                .map((l) => l.id);
+            let perSymbolQueryCount = 0;
+            for (const lid of symbolLayerIdsWithText) {
+                try {
+                    const symFeats = queryBBoxForSymbols
+                        ? map.queryRenderedFeatures(queryBBoxForSymbols, {
+                              layers: [lid],
+                              validate: false,
+                          })
+                        : map.queryRenderedFeatures(undefined, {
+                              layers: [lid],
+                              validate: false,
+                          });
+                    combinedQueryFeatures.push(...symFeats);
+                    perSymbolQueryCount += symFeats.length;
+                } catch (_) {
+                    /* stale layer id */
+                }
+            }
+            if (perSymbolQueryCount > 0) {
+                console.log(
+                    `✅ Per-symbol-layer queries: ${perSymbolQueryCount} ref(s) across ${symbolLayerIdsWithText.length} layer(s)`
+                );
+            }
+
             // ENHANCED: Detailed analysis of landcover layer availability
             console.log('🔍 DETAILED LAYER ANALYSIS:');
             const detailedLandcoverLayers = allLayers.filter(layer => 
@@ -469,7 +510,20 @@ class SVGExporter {
             }
             
             // FIXED: Also query by source layer to catch any features we might have missed
-            const importantSourceLayers = ['landcover', 'landuse', 'water', 'natural', 'place', 'building'];
+            const importantSourceLayers = [
+                'landcover',
+                'landuse',
+                'water',
+                'natural',
+                'place',
+                'place_label',
+                'poi_label',
+                'water_label',
+                'natural_label',
+                'transit_label',
+                'airport_label',
+                'building',
+            ];
             let sourceLayerFeatures = [];
             
             // ENHANCED: Add alternative source layers that might contain island base landmass and bridge-connected areas
@@ -938,8 +992,13 @@ class SVGExporter {
             });
             
             console.log(`🏝️ Found ${geometryBasedIslands.length} geometry-based island features`);
-            
-            // Combine all features
+
+            // Combine all features. Place-label parity with the canvas
+            // is intentional: we deliberately do NOT inject extra
+            // subdivision labels from `querySourceFeatures`, even though
+            // Mapbox's `filterrank`/collision logic hides some of them
+            // (e.g. "Het Lage Land" at filterrank 5 in Rotterdam). The
+            // print export mirrors exactly what the live canvas shows.
             const combinedFeatures = [
                 ...combinedQueryFeatures,
                 ...sourceLayerFeatures,
@@ -947,7 +1006,7 @@ class SVGExporter {
                 ...dutchIslandFeatures,
                 ...boundaryFeatures,
                 ...noordereilandFeatures,
-                ...geometryBasedIslands
+                ...geometryBasedIslands,
             ];
             
             // Remove duplicates based on layer, sourceLayer, and geometry
@@ -955,9 +1014,11 @@ class SVGExporter {
             const seen = new Set();
             
             combinedFeatures.forEach(feature => {
-                const key = `${feature.layer?.id || 'unknown'}-${feature.sourceLayer || 'unknown'}-${JSON.stringify(feature.geometry)}`;
-                if (!seen.has(key)) {
-                    seen.add(key);
+                const dedupe =
+                    ExportUtilities.exportUniqueSymbolKey(feature, zoom) ??
+                    `${feature.layer?.id || 'unknown'}-${feature.sourceLayer || 'unknown'}-${JSON.stringify(feature.geometry)}`;
+                if (!seen.has(dedupe)) {
+                    seen.add(dedupe);
                     uniqueFeatures.push(feature);
                 }
             });
@@ -1335,6 +1396,16 @@ class SVGExporter {
                 let zoomTolerance = 0;
                 if (isLandcoverOrLanduse || isLikelyIsland || isLandPolygon) {
                     zoomTolerance = 5; // Allow ±5 zoom levels for these important features (increased from 3)
+                } else if (layer.type === 'symbol') {
+                    // Symbol labels use aggressive min/max zoom in styles; export-time zoom can sit on the edge.
+                    const sl = feature.sourceLayer || layer['source-layer'] || '';
+                    const isPlaceLikeSymbol =
+                        sl === 'place_label' ||
+                        sl === 'natural_label' ||
+                        sl === 'water_label' ||
+                        sl === 'poi_label' ||
+                        sl === 'transit_label';
+                    zoomTolerance = isPlaceLikeSymbol ? 4 : 2;
                 }
                 
                 // Basic zoom and visibility checks with tolerance
@@ -1480,12 +1551,15 @@ class SVGExporter {
                 canvasHeight,
                 backgroundColor,
                 map,
-                usingVisualBounds ? boundsToUse : null,
+                visualBounds,
                 overlayExportData,
                 style
             );
             console.log('✅ Created SVG document');
             return svgDocument;
+            } finally {
+                ExportUtilities.clearEvalImportConfig();
+            }
         } catch (error) {
             console.error('❌ Error building SVG:', error);
             console.error('❌ Error stack:', error.stack);

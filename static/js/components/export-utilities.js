@@ -115,6 +115,73 @@ class ExportUtilities {
         return null;
     }
 
+    /**
+     * Default Mapbox Standard-style import.config keys used in expressions
+     * (visibility gates, concat(["config","font"], " Medium"), …).
+     * SVGExporter merges style.imports[].config over this for each export.
+     */
+    static DEFAULT_MAPBOX_IMPORT_CONFIG = Object.freeze({
+        font: 'DIN Pro',
+        showPlaceLabels: true,
+        showRoadLabels: true,
+        showTransitLabels: true,
+        showPointOfInterestLabels: true,
+        theme: 'monochrome',
+    });
+
+    /** Merged imports[].config for the active SVG/PDF export. */
+    static _evalImportConfig = null;
+
+    static setEvalImportConfig(config) {
+        ExportUtilities._evalImportConfig =
+            config && typeof config === 'object' ? { ...config } : null;
+    }
+
+    static clearEvalImportConfig() {
+        ExportUtilities._evalImportConfig = null;
+    }
+
+    static mergeImportConfigs(style) {
+        const out = { ...ExportUtilities.DEFAULT_MAPBOX_IMPORT_CONFIG };
+        if (!style || !Array.isArray(style.imports)) {
+            return out;
+        }
+        for (const imp of style.imports) {
+            if (imp && imp.config && typeof imp.config === 'object') {
+                Object.assign(out, imp.config);
+            }
+        }
+        return out;
+    }
+
+    static importConfigLookup(key, properties) {
+        const merged = {
+            ...ExportUtilities.DEFAULT_MAPBOX_IMPORT_CONFIG,
+            ...(ExportUtilities._evalImportConfig || {}),
+        };
+        if (
+            properties &&
+            properties.$mapboxImportConfig &&
+            typeof properties.$mapboxImportConfig === 'object'
+        ) {
+            Object.assign(merged, properties.$mapboxImportConfig);
+        }
+        return merged[key];
+    }
+
+    /** Resolve layout.visibility when it is a plain string or a Mapbox expression. */
+    static isSymbolLayoutVisible(layout, properties, zoom, geometryType = 'Point') {
+        if (!layout) return true;
+        const vis = layout.visibility;
+        if (vis === 'none' || vis === false) return false;
+        if (vis === undefined || vis === null || vis === 'visible') return true;
+        if (typeof vis === 'string') return vis !== 'none';
+        if (!Array.isArray(vis)) return true;
+        const ctx = { ...(properties || {}), zoom, $geometryType: geometryType };
+        const out = ExportUtilities.evaluateExpression(vis, ctx);
+        return out !== 'none' && out !== false && out !== 0 && out !== '' && out !== null;
+    }
+
     static evaluateExpression(expression, properties) {
         // Enhanced expression evaluator for Mapbox expressions
         if (typeof expression === 'string') {
@@ -128,6 +195,85 @@ class ExportUtilities {
         const operator = expression[0];
         
         switch (operator) {
+            case 'literal':
+                return expression.length > 1 ? expression[1] : null;
+
+            case 'to-string':
+                return String(this.evaluateExpression(expression[1], properties));
+
+            case 'downcase':
+                return String(this.evaluateExpression(expression[1], properties)).toLowerCase();
+
+            case 'upcase':
+                return String(this.evaluateExpression(expression[1], properties)).toUpperCase();
+
+            case 'concat': {
+                let acc = '';
+                for (let i = 1; i < expression.length; i++) {
+                    const part = this.evaluateExpression(expression[i], properties);
+                    if (part !== null && part !== undefined) {
+                        acc += String(part);
+                    }
+                }
+                return acc;
+            }
+
+            case 'format': {
+                let acc = '';
+                for (let i = 1; i < expression.length; i += 2) {
+                    const fragment = expression[i];
+                    if (fragment === undefined) break;
+                    if (
+                        fragment &&
+                        typeof fragment === 'object' &&
+                        !Array.isArray(fragment) &&
+                        Object.keys(fragment).length === 0
+                    ) {
+                        continue;
+                    }
+                    const evaluated = this.evaluateExpression(fragment, properties);
+                    if (evaluated !== null && evaluated !== undefined) {
+                        acc += String(evaluated);
+                    }
+                }
+                return acc;
+            }
+
+            case 'zoom':
+                return properties.zoom !== undefined && properties.zoom !== null
+                    ? Number(properties.zoom)
+                    : 12;
+
+            case 'config':
+                if (expression.length < 2) return null;
+                return ExportUtilities.importConfigLookup(expression[1], properties);
+
+            case 'geometry-type':
+                return properties.$geometryType !== undefined ? properties.$geometryType : 'Point';
+
+            case 'match': {
+                if (expression.length < 4) break;
+                const input = this.evaluateExpression(expression[1], properties);
+                for (let i = 2; i < expression.length - 1; i += 2) {
+                    const labels = expression[i];
+                    const outExpr = expression[i + 1];
+                    let hit = false;
+                    if (Array.isArray(labels)) {
+                        if (labels[0] === 'literal' && Array.isArray(labels[1])) {
+                            hit = labels[1].some((l) => l == input);
+                        } else {
+                            hit = this.evaluateExpression(labels, properties) == input;
+                        }
+                    } else {
+                        hit = labels == input;
+                    }
+                    if (hit) {
+                        return this.evaluateExpression(outExpr, properties);
+                    }
+                }
+                return this.evaluateExpression(expression[expression.length - 1], properties);
+            }
+
             case 'get':
                 if (expression[1] && Object.prototype.hasOwnProperty.call(properties, expression[1])) {
                     const v = properties[expression[1]];
@@ -157,39 +303,36 @@ class ExportUtilities {
                 return product;
             }
                 
-            case 'interpolate':
-                // Handle interpolate expressions: ['interpolate', ['linear'], ['zoom'], ...stops]
-                if (expression.length >= 4 && properties.zoom !== undefined) {
-                    const zoom = properties.zoom;
-                    const stops = expression.slice(3);
-                    
-                    // Find the appropriate stop based on zoom level
-                    for (let i = 0; i < stops.length - 1; i += 2) {
-                        const stopZoom = stops[i];
-                        const stopValue = stops[i + 1];
-                        const nextStopZoom = stops[i + 2];
-                        
-                        if (zoom <= stopZoom) {
-                            return stopValue;
-                        } else if (zoom <= nextStopZoom) {
-                            // Linear interpolation between stops
-                            const nextStopValue = stops[i + 3];
-                            const ratio = (zoom - stopZoom) / (nextStopZoom - stopZoom);
-                            
-                            // Handle numeric interpolation
-                            if (typeof stopValue === 'number' && typeof nextStopValue === 'number') {
-                                return stopValue + (nextStopValue - stopValue) * ratio;
-                            }
-                            
-                            // For non-numeric values, return the lower stop
-                            return stopValue;
-                        }
-                    }
-                    
-                    // Return the last stop value if zoom is beyond all stops
-                    return stops[stops.length - 1];
+            case 'interpolate': {
+                // ['interpolate', [<curve>], input, z0, v0, z1, v1, ...]
+                if (expression.length < 6) break;
+                const input = Number(this.evaluateExpression(expression[2], properties));
+                const stops = expression.slice(3);
+                if (!Number.isFinite(input)) {
+                    return stops.length ? this.evaluateExpression(stops[stops.length - 1], properties) : null;
                 }
-                break;
+                const zFirst = Number(stops[0]);
+                if (Number.isFinite(zFirst) && input <= zFirst) {
+                    return this.evaluateExpression(stops[1], properties);
+                }
+                for (let i = 0; i + 3 < stops.length; i += 2) {
+                    const zA = Number(stops[i]);
+                    const zB = Number(stops[i + 2]);
+                    const vA = stops[i + 1];
+                    const vB = stops[i + 3];
+                    if (!Number.isFinite(zA) || !Number.isFinite(zB)) continue;
+                    if (input > zA && input <= zB) {
+                        const ratio = (input - zA) / (zB - zA);
+                        const evA = this.evaluateExpression(vA, properties);
+                        const evB = this.evaluateExpression(vB, properties);
+                        if (typeof evA === 'number' && typeof evB === 'number') {
+                            return evA + (evB - evA) * ratio;
+                        }
+                        return evA;
+                    }
+                }
+                return this.evaluateExpression(stops[stops.length - 1], properties);
+            }
                 
             case 'case':
                 // Handle case expressions: ['case', condition1, value1, condition2, value2, ..., fallback]
@@ -207,24 +350,51 @@ class ExportUtilities {
                 return this.evaluateExpression(expression[expression.length - 1], properties);
                 
             case 'step':
-                // Handle step expressions: ['step', ['get', 'property'], default, stop1, value1, ...]
+                // Mapbox step: last output whose stop <= input (stops ascending).
                 if (expression.length >= 3) {
-                    const input = this.evaluateExpression(expression[1], properties);
-                    const defaultValue = expression[2];
-                    
+                    const input = Number(this.evaluateExpression(expression[1], properties));
+                    let chosen = expression[2];
                     for (let i = 3; i < expression.length - 1; i += 2) {
-                        const stop = expression[i];
+                        const stop = Number(this.evaluateExpression(expression[i], properties));
                         const value = expression[i + 1];
-                        
-                        if (input >= stop) {
-                            return value;
+                        if (Number.isFinite(input) && Number.isFinite(stop) && input >= stop) {
+                            chosen = value;
                         }
                     }
-                    
-                    return defaultValue;
+                    return this.evaluateExpression(chosen, properties);
                 }
                 break;
                 
+            case '+': {
+                let sum = 0;
+                for (let i = 1; i < expression.length; i++) {
+                    const v = Number(this.evaluateExpression(expression[i], properties));
+                    if (!Number.isFinite(v)) {
+                        return NaN;
+                    }
+                    sum += v;
+                }
+                return sum;
+            }
+
+            case 'measure-light':
+                // Standard gates symbols on perceived brightness; static SVG export has no lighting model.
+                return 0.85;
+
+            case 'to-boolean':
+                return Boolean(this.evaluateExpression(expression[1], properties));
+
+            case 'number': {
+                for (let i = 1; i < expression.length; i++) {
+                    const v = this.evaluateExpression(expression[i], properties);
+                    const n = typeof v === 'number' ? v : Number(v);
+                    if (Number.isFinite(n)) {
+                        return n;
+                    }
+                }
+                return NaN;
+            }
+
             default:
                 // For unknown operators, try to return a reasonable default
                 if (expression.length > 1) {
@@ -233,6 +403,137 @@ class ExportUtilities {
         }
         
         return String(expression);
+    }
+
+    /**
+     * Best-effort primary label string from vector tile properties (Mapbox Streets-style).
+     * Dutch neighbourhoods often live under name_nl while style text-fields still resolve on canvas.
+     */
+    static resolveLocalizedPlaceName(properties) {
+        if (!properties || typeof properties !== 'object') {
+            return '';
+        }
+        const keys = [
+            'name_nl', 'name_en', 'name_de', 'name_fr', 'name_es',
+            'name_int', 'name_nonlatin', 'name_script', 'name_ascii',
+            'name_latin', 'name_local', 'name_short', 'name_alt',
+            'label', 'label_en',
+            'name', 'text',
+        ];
+        for (const k of keys) {
+            const v = properties[k];
+            if (v !== undefined && v !== null) {
+                const s = String(v).trim();
+                if (s) return s;
+            }
+        }
+        return '';
+    }
+
+    /** Lng/lat anchor for symbol labels (Point or first MultiPoint vertex). */
+    static symbolAnchorLngLat(feature) {
+        const g = feature?.geometry;
+        if (!g) return null;
+        if (g.type === 'Point' && Array.isArray(g.coordinates) && g.coordinates.length >= 2) {
+            const [lng, lat] = g.coordinates;
+            return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+        }
+        if (g.type === 'MultiPoint' && Array.isArray(g.coordinates) && g.coordinates.length > 0) {
+            const p = g.coordinates[0];
+            if (Array.isArray(p) && p.length >= 2) {
+                const [lng, lat] = p;
+                return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Same primary string the SVG aims to draw: evaluated layer text-field, then property fallbacks.
+     * Using this for dedupe avoids collapsing e.g. "Rotterdam" (generic `name`) with "Rotterdam-Noord"
+     * when the style's text-field resolves to `name_nl` / a case branch.
+     */
+    static symbolEvaluatedLabelText(feature, zoom = 12) {
+        const props = feature.properties || {};
+        const layer = feature.layer || {};
+        const tf = layer.layout && layer.layout['text-field'];
+        const geomType = feature.geometry?.type || 'Point';
+        const ctx = { ...props, zoom, $geometryType: geomType };
+        if (tf) {
+            const t = ExportUtilities.evaluateExpression(tf, ctx);
+            if (t !== null && t !== undefined && String(t).trim() !== '') {
+                return String(t).trim();
+            }
+        }
+        return String(ExportUtilities.resolveLocalizedPlaceName(props) || '').trim();
+    }
+
+    /** Stable key for point symbol labels (rounded lng/lat + layer ids + primary name). */
+    static symbolLabelDedupeKey(feature, zoom = 12) {
+        if (!feature?.layer || feature.layer.type !== 'symbol') {
+            return null;
+        }
+        const anchor = ExportUtilities.symbolAnchorLngLat(feature);
+        if (!anchor) return null;
+        const [lng, lat] = anchor;
+        const txt = ExportUtilities.symbolEvaluatedLabelText(feature, zoom);
+        const lid = feature.layer.id || '';
+        const sl = feature.sourceLayer || feature.layer['source-layer'] || '';
+        return `${lid}|${sl}|${lng.toFixed(5)}|${lat.toFixed(5)}|${txt}`;
+    }
+
+    /**
+     * Dedupe place-like symbols that share the same tile name + ~location across
+     * style layers (collision siblings / overlapping queries).
+     */
+    static symbolPlacementDedupeKey(feature, zoom = 12) {
+        if (!feature?.layer || feature.layer.type !== 'symbol') {
+            return null;
+        }
+        const anchor = ExportUtilities.symbolAnchorLngLat(feature);
+        if (!anchor) return null;
+        const [lng, lat] = anchor;
+        const sl = feature.sourceLayer || feature.layer['source-layer'] || '';
+        if (sl !== 'place_label' && sl !== 'natural_label' && sl !== 'water_label') {
+            return null;
+        }
+        const name = ExportUtilities.symbolEvaluatedLabelText(feature, zoom);
+        if (!name) return null;
+        return `${sl}|${lng.toFixed(4)}|${lat.toFixed(4)}|${name}`;
+    }
+
+    /**
+     * Single key for deduping exported point symbols and for `data-export-symbol-key`.
+     * Matches svg-exporter uniqueFeatures logic (place bucket vs full symbol key vs geometry fallback).
+     */
+    static exportUniqueSymbolKey(feature, zoom = 12) {
+        if (!feature?.layer || feature.layer.type !== 'symbol') {
+            return null;
+        }
+        const lid = feature.layer.id || '';
+        if (String(lid).includes('marker')) {
+            return null;
+        }
+        if (!ExportUtilities.symbolAnchorLngLat(feature)) {
+            return null;
+        }
+        const placeDedupe = ExportUtilities.symbolPlacementDedupeKey(feature, zoom);
+        const symKey = ExportUtilities.symbolLabelDedupeKey(feature, zoom);
+        if (placeDedupe !== null) {
+            return `symplace:${placeDedupe}`;
+        }
+        if (symKey !== null) {
+            return `sym:${symKey}`;
+        }
+        return `${feature.layer?.id || 'unknown'}-${feature.sourceLayer || 'unknown'}-${JSON.stringify(feature.geometry)}`;
+    }
+
+    /** Minimal XML escaping for double-quoted attribute values (SVG fragment emission). */
+    static escapeXmlAttr(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;');
     }
 
     static evaluateCondition(condition, properties) {
@@ -257,8 +558,54 @@ class ExportUtilities {
                 return this.evaluateExpression(condition[1], properties) <= this.evaluateExpression(condition[2], properties);
             case 'has':
                 return properties.hasOwnProperty(condition[1]);
-            default:
-                return Boolean(condition);
+            case '!has':
+                return !properties.hasOwnProperty(condition[1]);
+            case '!':
+            case 'not':
+                return !this.evaluateCondition(condition[1], properties);
+            case 'all':
+                for (let i = 1; i < condition.length; i++) {
+                    if (!this.evaluateCondition(condition[i], properties)) return false;
+                }
+                return true;
+            case 'any':
+                for (let i = 1; i < condition.length; i++) {
+                    if (this.evaluateCondition(condition[i], properties)) return true;
+                }
+                return false;
+            case 'boolean':
+                return Boolean(condition[1]);
+            case 'config':
+                return Boolean(ExportUtilities.importConfigLookup(condition[1], properties));
+            case 'match':
+                return Boolean(this.evaluateExpression(condition, properties));
+            case 'in': {
+                const needle = this.evaluateExpression(condition[1], properties);
+                if (condition.length < 3) return false;
+                const third = condition[2];
+                if (Array.isArray(third) && third[0] === 'literal' && Array.isArray(third[1])) {
+                    return third[1].some((x) => x == needle);
+                }
+                for (let i = 2; i < condition.length; i++) {
+                    if (needle == condition[i]) return true;
+                }
+                return false;
+            }
+            case '!in':
+                return !this.evaluateCondition(['in', ...condition.slice(1)], properties);
+            case 'to-boolean':
+                return Boolean(this.evaluateExpression(condition[1], properties));
+            case 'within':
+            case 'distance':
+            case 'feature-state':
+                // Viewport queries already approximate GL visibility; unknown spatial predicates default open.
+                return true;
+            default: {
+                const v = this.evaluateExpression(condition, properties);
+                if (v === false || v === 'none' || v === '' || v === null) return false;
+                if (typeof v === 'number' && !Number.isFinite(v)) return false;
+                return Boolean(v);
+            }
         }
     }
 }

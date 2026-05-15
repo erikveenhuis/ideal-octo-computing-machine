@@ -3,9 +3,11 @@
   "private": true,
   "description": "JS test harness for the GPX SVG export components.",
   "scripts": {
-    "test": "node --test tests-js/*.test.js"
+    "test": "node --test tests-js/*.test.js",
+    "test:e2e:placenames": "node tests-js/e2e/gpx-placename-pdf-parity.cjs"
   },
   "devDependencies": {
-    "jsdom": "^24.1.0"
+    "jsdom": "^24.1.0",
+    "playwright": "^1.52.0"
   }
 }

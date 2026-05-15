@@ -36,6 +36,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FONT_DIR = path.join(REPO_ROOT, 'static', 'fonts', 'DIN Pro');
 const REGULAR_OTF = path.join(FONT_DIR, 'dinpro.otf');
 const BOLD_OTF = path.join(FONT_DIR, 'dinpro_bold.otf');
+const MEDIUM_OTF = path.join(FONT_DIR, 'dinpro_medium.otf');
 
 // ---------------------------------------------------------------------------
 // jsdom + globals (mirrors svg-export-pipeline.test.js)
@@ -62,10 +63,12 @@ global.window.opentype = opentypeLib;
 // instead of via the network.
 global.fetch = async (url) => {
     let diskPath;
-    if (typeof url === 'string' && url.endsWith('dinpro.otf')) {
-        diskPath = REGULAR_OTF;
-    } else if (typeof url === 'string' && url.endsWith('dinpro_bold.otf')) {
+    if (typeof url === 'string' && url.endsWith('dinpro_bold.otf')) {
         diskPath = BOLD_OTF;
+    } else if (typeof url === 'string' && url.endsWith('dinpro_medium.otf')) {
+        diskPath = MEDIUM_OTF;
+    } else if (typeof url === 'string' && url.endsWith('dinpro.otf')) {
+        diskPath = REGULAR_OTF;
     } else {
         throw new Error(`unexpected fetch URL: ${url}`);
     }
@@ -367,12 +370,13 @@ test('_pickFontVariant maps CSS font-weight to the right DIN Pro OTF', async () 
     });
     await TextOutliner.outlineSvgTextNodes(wrapSvg(txt));
     const fonts = TextOutliner._fontCache;
-    assert.ok(fonts && fonts.regular && fonts.bold, 'font cache must be populated');
+    assert.ok(fonts && fonts.regular && fonts.medium && fonts.bold, 'font cache must be populated');
 
     // Numeric CSS weights.
     assert.equal(TextOutliner._pickFontVariant(100, fonts), fonts.regular);
     assert.equal(TextOutliner._pickFontVariant(400, fonts), fonts.regular);
-    assert.equal(TextOutliner._pickFontVariant(500, fonts), fonts.regular);
+    assert.equal(TextOutliner._pickFontVariant(500, fonts), fonts.medium,
+        'CSS weight 500 (medium) must use DIN Pro Medium for Standard labels');
     assert.equal(TextOutliner._pickFontVariant(600, fonts), fonts.bold,
         'CSS weight 600 (semibold) should still pick the bold OTF');
     assert.equal(TextOutliner._pickFontVariant(700, fonts), fonts.bold);
@@ -391,6 +395,133 @@ test('_pickFontVariant maps CSS font-weight to the right DIN Pro OTF', async () 
     assert.equal(TextOutliner._pickFontVariant(undefined, fonts), fonts.regular);
 });
 
+
+test('multi-tspan <text> without per-tspan y inherits y from the parent <text>', async () => {
+    // FeatureConverter emits wrapped basemap labels as
+    //   <text x="100" y="500"><tspan x="100">OUD-</tspan><tspan x="100" dy="14">CHARLOIS</tspan></text>
+    // The first tspan has no `y`; per SVG it must inherit from the parent.
+    // Without inheritance text-outliner used to default tspan y to 0,
+    // pinning every wrapped basemap label to the top of the SVG.
+    const text = document.createElementNS(SVG_NS, 'text');
+    text.setAttribute('x', '100');
+    text.setAttribute('y', '500');
+    text.setAttribute('font-family', 'DIN Pro Bold');
+    text.setAttribute('font-size', '12');
+    text.setAttribute('font-weight', '700');
+
+    const t1 = document.createElementNS(SVG_NS, 'tspan');
+    t1.setAttribute('x', '100');
+    t1.textContent = 'OUD-';
+    const t2 = document.createElementNS(SVG_NS, 'tspan');
+    t2.setAttribute('x', '100');
+    t2.setAttribute('dy', '14');
+    t2.textContent = 'CHARLOIS';
+    text.appendChild(t1);
+    text.appendChild(t2);
+
+    const svg = wrapSvg(text);
+    await TextOutliner.outlineSvgTextNodes(svg);
+
+    const paths = Array.from(svg.querySelectorAll('g.text-outline > path'));
+    assert.equal(paths.length, 2, 'one outlined <path> per tspan');
+
+    // First glyph y in each path d. The first tspan baseline must be at
+    // y≈500 (inherited from parent), not 0.
+    const firstY = (p) => {
+        const d = p.getAttribute('d');
+        const m = d && d.match(/^M\s*-?[\d.]+\s+(-?[\d.]+)/);
+        return m ? parseFloat(m[1]) : NaN;
+    };
+    const y1 = firstY(paths[0]);
+    const y2 = firstY(paths[1]);
+    assert.ok(
+        Math.abs(y1 - 500) < 12,
+        `tspan #1 baseline should sit near the parent y=500 (inherited); got y≈${y1}`
+    );
+    assert.ok(
+        Math.abs(y2 - 514) < 12,
+        `tspan #2 baseline should sit near y=514 (500 inherited + dy=14); got y≈${y2}`
+    );
+});
+
+test('SVG letter-spacing is honoured when outlining basemap-style labels', async () => {
+    function mkAa(letterSpacingAttr) {
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', '50');
+        t.setAttribute('y', '80');
+        t.setAttribute('text-anchor', 'start');
+        t.setAttribute('font-family', 'DIN Pro');
+        t.setAttribute('font-size', '28');
+        t.setAttribute('font-weight', 'bold');
+        if (letterSpacingAttr !== undefined) {
+            t.setAttribute('letter-spacing', letterSpacingAttr);
+        }
+        t.textContent = 'AA';
+        return t;
+    }
+
+    const svgTight = wrapSvg(mkAa(undefined));
+    const svgTracked = wrapSvg(mkAa('10'));
+
+    await TextOutliner.outlineSvgTextNodes(svgTight);
+    await TextOutliner.outlineSvgTextNodes(svgTracked);
+
+    const pathWidth = (svg) => {
+        const d = svg.querySelector('path').getAttribute('d');
+        const nums = d.match(/-?\d+(?:\.\d+)?/g) || [];
+        let minX = Infinity;
+        let maxX = -Infinity;
+        for (let i = 0; i < nums.length; i += 2) {
+            const xv = parseFloat(nums[i]);
+            if (!Number.isFinite(xv)) continue;
+            if (xv < minX) minX = xv;
+            if (xv > maxX) maxX = xv;
+        }
+        return maxX - minX;
+    };
+
+    assert.ok(
+        pathWidth(svgTracked) > pathWidth(svgTight) + 5,
+        `letter-spacing should widen the outlined glyph cluster (tracked=${pathWidth(svgTracked)}, tight=${pathWidth(svgTight)})`
+    );
+});
+
+test('<tspan> without font-weight inherits bold from parent <text>', async () => {
+    function mkBoldSingleLine() {
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', '10');
+        t.setAttribute('y', '50');
+        t.setAttribute('font-family', 'DIN Pro');
+        t.setAttribute('font-size', '48');
+        t.setAttribute('font-weight', '700');
+        t.textContent = 'Q';
+        return t;
+    }
+
+    function mkBoldViaTspan() {
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', '10');
+        t.setAttribute('y', '50');
+        t.setAttribute('font-family', 'DIN Pro');
+        t.setAttribute('font-size', '48');
+        t.setAttribute('font-weight', '700');
+        const ts = document.createElementNS(SVG_NS, 'tspan');
+        ts.setAttribute('x', '10');
+        ts.textContent = 'Q';
+        t.appendChild(ts);
+        return t;
+    }
+
+    const svg1 = wrapSvg(mkBoldSingleLine());
+    const svg2 = wrapSvg(mkBoldViaTspan());
+    await TextOutliner.outlineSvgTextNodes(svg1);
+    await TextOutliner.outlineSvgTextNodes(svg2);
+
+    const d1 = svg1.querySelector('path').getAttribute('d');
+    const d2 = svg2.querySelector('path').getAttribute('d');
+    assert.ok(d1 && d2 && d1.length > 0, 'both outlines emit path data');
+    assert.equal(d2, d1, 'tspan without explicit weight must use parent bold DIN Pro outlines');
+});
 
 test('removes <text> nodes whose content is empty / whitespace', async () => {
     const empty = makeOverlayText({

@@ -152,6 +152,78 @@ class FontManager {
         return /italic|oblique/.test(primary) ? 'italic' : 'normal';
     }
 
+    /** True when text-font has been evaluated to a stack of Mapbox font-name strings. */
+    static isPlainFontNameStack(tf) {
+        return Array.isArray(tf) && tf.length > 0 && tf.every((x) => typeof x === 'string');
+    }
+
+    /** Strip nested ['literal', [...]] wrappers after evaluating text-font. */
+    static unwrapLiteralFontStack(tf) {
+        let cur = tf;
+        while (Array.isArray(cur) && cur.length >= 2 && cur[0] === 'literal') {
+            cur = cur[1];
+        }
+        return cur;
+    }
+
+    /**
+     * layout['text-font'] may be a plain stack, or Mapbox Standard stacks built from
+     * per-slot expressions like [["concat",["config","font"]," Medium"],"Arial Unicode MS Bold"].
+     */
+    static normalizeMapboxFontStack(names) {
+        return names.map((n) =>
+            typeof n === 'string' ? n.replace(/^DIN Offc Pro\b/i, 'DIN Pro') : String(n)
+        );
+    }
+
+    static resolveTextFontStack(textFont, properties, zoom = 12) {
+        if (!textFont || !Array.isArray(textFont) || textFont.length === 0) {
+            return null;
+        }
+        const EU =
+            typeof ExportUtilities !== 'undefined'
+                ? ExportUtilities
+                : typeof globalThis !== 'undefined'
+                  ? globalThis.ExportUtilities
+                  : null;
+        const ctx = { ...(properties || {}), zoom };
+
+        if (FontManager.isPlainFontNameStack(textFont)) {
+            return FontManager.normalizeMapboxFontStack(textFont);
+        }
+
+        if (!EU || typeof EU.evaluateExpression !== 'function') {
+            return null;
+        }
+
+        const stackLike = textFont.every(
+            (x) =>
+                typeof x === 'string' ||
+                (Array.isArray(x) && x.length > 0 && typeof x[0] === 'string')
+        );
+        if (stackLike) {
+            const parts = [];
+            for (const entry of textFont) {
+                if (typeof entry === 'string') {
+                    parts.push(entry);
+                } else {
+                    const ev = EU.evaluateExpression(entry, ctx);
+                    if (ev === null || ev === undefined || ev === '') {
+                        return null;
+                    }
+                    parts.push(String(ev));
+                }
+            }
+            return FontManager.normalizeMapboxFontStack(parts);
+        }
+
+        let tf = EU.evaluateExpression(textFont, ctx);
+        tf = FontManager.unwrapLiteralFontStack(tf);
+        return FontManager.isPlainFontNameStack(tf)
+            ? FontManager.normalizeMapboxFontStack(tf)
+            : null;
+    }
+
     /**
      * Generate CSS font-face definitions for SVG
      */

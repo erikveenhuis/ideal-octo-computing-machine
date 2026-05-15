@@ -37,7 +37,7 @@ class SVGRenderer {
         
         // Calculate projection from lat/lng to SVG coordinates
         // Pass visual bounds if available for more accurate projection
-        const projection = MapProjection.create(bounds, center, width, height, bearing, visualBounds);
+        const projection = MapProjection.create(bounds, center, width, height, bearing, visualBounds, map);
 
         // Pre-load every text-font referenced by the visible labels into the
         // document so canvas measureText returns accurate glyph widths during
@@ -53,9 +53,14 @@ class SVGRenderer {
         ];
         const distinctFontSpecs = new Map();
         for (const feature of labelLikeFeatures) {
-            const tf = feature.layer?.layout?.['text-font'];
-            if (Array.isArray(tf) && tf.length > 0) {
-                distinctFontSpecs.set(tf.join('|'), tf);
+            const rawTf = feature.layer?.layout?.['text-font'];
+            const resolved =
+                rawTf && Array.isArray(rawTf)
+                    ? FontManager.resolveTextFontStack(rawTf, feature.properties || {}, zoom)
+                    : null;
+            const stack = resolved && resolved.length > 0 ? resolved : null;
+            if (stack) {
+                distinctFontSpecs.set(stack.join('|'), stack);
             }
         }
         if (distinctFontSpecs.size > 0) {
@@ -99,8 +104,17 @@ class SVGRenderer {
         // Process style layers in their natural order
         styleLayers.forEach((layer, index) => {
             const sourceLayer = layer['source-layer'];
-            const layerType = layerTypeMapping[sourceLayer] || 'other';
-            
+            let layerType = 'other';
+            if (layer.type === 'background') {
+                layerType = 'background';
+            } else if (sourceLayer && layerTypeMapping[sourceLayer]) {
+                layerType = layerTypeMapping[sourceLayer];
+            } else if (sourceLayer && sourceLayer.endsWith('_label')) {
+                layerType = 'labels';
+            } else if (layer.type === 'symbol') {
+                layerType = 'labels';
+            }
+
             // Only add each layer type once, in the order they first appear
             if (!processedTypes.has(layerType) && availableLayerTypes.includes(layerType)) {
                 renderOrder.push({
@@ -263,11 +277,23 @@ class SVGRenderer {
         const hasCutLayers = overlayData && Array.isArray(overlayData.cutLayers) && overlayData.cutLayers.length > 0;
         if (overlayData && (overlayData.innerContent || hasCutLayers)) {
             const viewBox = overlayData.viewBox || { minX: 0, minY: 0, width: width, height: height };
-            const scaleX = viewBox.width ? width / viewBox.width : 1;
-            const scaleY = viewBox.height ? height / viewBox.height : 1;
-            const translateX = -viewBox.minX * scaleX;
-            const translateY = -viewBox.minY * scaleY;
-            const overlayTransform = `translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})`;
+            // Match [templates/components/gpx_styles.html]: overlay preview uses
+            // width/height 100% + object-fit: contain (uniform scale, centered).
+            // Independent scaleX/scaleY used to stretch the medal to the full SVG
+            // viewport, shifting the Thrucut window vs the map vs on-screen PDF preview.
+            const vbW = viewBox.width;
+            const vbH = viewBox.height;
+            let overlayTransform;
+            if (vbW > 0 && vbH > 0) {
+                const s = Math.min(width / vbW, height / vbH);
+                const offsetX = (width - s * vbW) / 2;
+                const offsetY = (height - s * vbH) / 2;
+                const tx = offsetX - s * viewBox.minX;
+                const ty = offsetY - s * viewBox.minY;
+                overlayTransform = `translate(${tx}, ${ty}) scale(${s})`;
+            } else {
+                overlayTransform = `translate(${-viewBox.minX}, ${-viewBox.minY}) scale(1)`;
+            }
 
             if (overlayData.innerContent) {
                 svgBody += `  <!-- OVERLAY LAYER -->\n`;

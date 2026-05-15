@@ -13,6 +13,85 @@ class FeatureConverter {
         return this.fontManager;
     }
 
+    /** Screen/SVG pixel position for one lng/lat (uses map.project when available). */
+    static lngLatToXY(projection, lng, lat) {
+        if (typeof projection.lngLatToXY === 'function') {
+            return projection.lngLatToXY(lng, lat);
+        }
+        return {
+            x: projection.lngToX(lng),
+            y: projection.latToY(lat),
+        };
+    }
+
+    /**
+     * Resolve Mapbox paint fields (text-color, text-opacity, halos, etc.) that may
+     * be plain literals, rgba arrays, or zoom/feature expressions. Without this,
+     * labels with expression paints were skipped or emitted with invalid fills.
+     */
+    static evalSymbolPaint(value, properties, zoom) {
+        if (value === undefined || value === null) {
+            return undefined;
+        }
+        if (typeof value === 'string' || typeof value === 'number') {
+            return value;
+        }
+        if (typeof value === 'boolean') {
+            return value;
+        }
+        if (typeof value === 'object' && value !== null && 'r' in value && 'g' in value && 'b' in value) {
+            return ExportUtilities.rgbaObjectToCSS(value);
+        }
+        if (Array.isArray(value)) {
+            const op = value[0];
+            if (op === 'rgba' && value.length >= 5) {
+                return `rgba(${value[1]},${value[2]},${value[3]},${value[4]})`;
+            }
+            if (op === 'rgb' && value.length >= 4) {
+                return `rgb(${value[1]},${value[2]},${value[3]})`;
+            }
+            const ctx = { zoom, ...(properties || {}) };
+            const ev = ExportUtilities.evaluateExpression(value, ctx);
+            if (ev === undefined || ev === null) {
+                return undefined;
+            }
+            if (typeof ev === 'object' && ev !== null && 'r' in ev && 'g' in ev && 'b' in ev) {
+                return ExportUtilities.rgbaObjectToCSS(ev);
+            }
+            return ev;
+        }
+        return value;
+    }
+
+    /**
+     * Mapbox `text-letter-spacing` is usually an em value but Standard styles
+     * often wrap it in zoom/feature expressions. Treating only numeric literals
+     * collapses tracking to 0 — wrapping/layout and outlined glyphs no longer
+     * match the canvas.
+     */
+    static evalTextLetterSpacing(layout, properties, zoom) {
+        if (!layout) return 0;
+        const tls = layout['text-letter-spacing'];
+        if (tls === undefined || tls === null) return 0;
+        if (typeof tls === 'number') {
+            return Number.isFinite(tls) ? tls : 0;
+        }
+        if (typeof tls === 'object') {
+            try {
+                const v = ExportUtilities.evaluateExpression(tls, {
+                    ...(properties || {}),
+                    zoom,
+                });
+                const n = Number(v);
+                return Number.isFinite(n) ? n : 0;
+            } catch (_) {
+                return 0;
+            }
+        }
+        const n = Number(tls);
+        return Number.isFinite(n) ? n : 0;
+    }
+
     static featureToSVG(feature, projection, map) {
         const geometry = feature.geometry;
         const properties = feature.properties || {};
@@ -39,8 +118,42 @@ class FeatureConverter {
             case 'Polygon':
                 return this.polygonToSVG(geometry.coordinates, paint, projection, layerId, sourceLayer, map, isIslandFeature, properties);
             
-            case 'Point':
-                return this.pointToSVG(geometry.coordinates, properties, paint, layout, projection, layerId);
+            case 'Point': {
+                const zoom = projection.getZoom
+                    ? projection.getZoom()
+                    : window.gpxApp?.mapManager?.getMap()?.getZoom?.() || 12;
+                const exportSymbolKey = ExportUtilities.exportUniqueSymbolKey(feature, zoom);
+                return this.pointToSVG(
+                    geometry.coordinates,
+                    properties,
+                    paint,
+                    layout,
+                    projection,
+                    layerId,
+                    exportSymbolKey,
+                    'Point'
+                );
+            }
+
+            case 'MultiPoint': {
+                const pts = geometry.coordinates;
+                if (!Array.isArray(pts) || pts.length === 0 || !Array.isArray(pts[0])) return null;
+                const zoom = projection.getZoom
+                    ? projection.getZoom()
+                    : window.gpxApp?.mapManager?.getMap()?.getZoom?.() || 12;
+                const synth = { ...feature, geometry: { type: 'Point', coordinates: pts[0] } };
+                const exportSymbolKey = ExportUtilities.exportUniqueSymbolKey(synth, zoom);
+                return this.pointToSVG(
+                    pts[0],
+                    properties,
+                    paint,
+                    layout,
+                    projection,
+                    layerId,
+                    exportSymbolKey,
+                    'MultiPoint'
+                );
+            }
             
             case 'MultiLineString':
                 return geometry.coordinates.map(coords => 
@@ -58,9 +171,10 @@ class FeatureConverter {
     }
 
     static lineStringToSVG(coordinates, paint, projection, layerId, map) {
-        const points = coordinates.map(coord => 
-            `${projection.lngToX(coord[0]).toFixed(2)},${projection.latToY(coord[1]).toFixed(2)}`
-        ).join(' ');
+        const points = coordinates.map((coord) => {
+            const { x, y } = this.lngLatToXY(projection, coord[0], coord[1]);
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+        }).join(' ');
         
         let color = paint['line-color'];
         let width = paint['line-width'] || 1;
@@ -306,9 +420,8 @@ class FeatureConverter {
         const ringToSubpath = (ring) => {
             if (!ring || ring.length === 0) return '';
             const segments = ring.map((coord, idx) => {
-                const x = projection.lngToX(coord[0]).toFixed(2);
-                const y = projection.latToY(coord[1]).toFixed(2);
-                return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+                const { x, y } = this.lngLatToXY(projection, coord[0], coord[1]);
+                return `${idx === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
             });
             return segments.join(' ') + ' Z';
         };
@@ -531,7 +644,7 @@ class FeatureConverter {
         return polygonElement;
     }
 
-    static pointToSVG(coordinates, properties, paint, layout, projection, layerId = null) {
+    static pointToSVG(coordinates, properties, paint, layout, projection, layerId = null, exportSymbolKey = null, geometryType = 'Point') {
         // Skip the marker-labels companion of marker-circles. Both Mapbox
         // layers emit a feature for every endpoint (start/finish), so without
         // this guard each route exported two stacked <g class="marker">
@@ -545,8 +658,7 @@ class FeatureConverter {
             return null;
         }
 
-        const x = projection.lngToX(coordinates[0]);
-        const y = projection.latToY(coordinates[1]);
+        const { x, y } = this.lngLatToXY(projection, coordinates[0], coordinates[1]);
 
         // ENHANCED: Special handling for combined circle+text markers (S and F markers)
         const hasCircle = paint['circle-radius'];
@@ -626,15 +738,27 @@ class FeatureConverter {
         
         // Check if this is a text label and if it should be visible
         if (layout['text-field']) {
-            // Check text visibility
-            const textVisibility = layout['visibility'];
-            if (textVisibility === 'none') {
-                return null; // Don't render hidden text
+            const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
+            // Visibility may be a Standard-style expression (config.showPlaceLabels, …).
+            if (!ExportUtilities.isSymbolLayoutVisible(layout, properties, zoom, geometryType)) {
+                return null;
             }
-            
-            let text = ExportUtilities.evaluateExpression(layout['text-field'], properties);
-            if (!text || text.trim() === '') {
-                return null; // Don't render empty text
+
+            const exportTagKey =
+                exportSymbolKey && layerId && !String(layerId).includes('marker')
+                    ? exportSymbolKey
+                    : null;
+
+            let text = ExportUtilities.evaluateExpression(layout['text-field'], {
+                ...properties,
+                zoom,
+                $geometryType: geometryType,
+            });
+            if (!text || String(text).trim() === '') {
+                text = ExportUtilities.resolveLocalizedPlaceName(properties);
+            }
+            if (!text || String(text).trim() === '') {
+                return null;
             }
             
             // Apply text transformation if specified in the style
@@ -648,19 +772,33 @@ class FeatureConverter {
             // Evaluate font size with zoom context for proper interpolation
             let fontSize = layout['text-size'];
             if (fontSize && typeof fontSize === 'object') {
-                // Font size is an expression - evaluate it with zoom context
-                const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
                 fontSize = ExportUtilities.evaluateExpression(fontSize, { ...properties, zoom });
             }
-            const textColor = paint['text-color'];
-            const textOpacity = paint['text-opacity'];
-            const textHaloColor = paint['text-halo-color'];
-            const textHaloWidth = paint['text-halo-width'];
+            {
+                const fsNum = Number(fontSize);
+                if (!Number.isFinite(fsNum) || fsNum <= 0) {
+                    fontSize = 12;
+                }
+            }
+            let textColor = this.evalSymbolPaint(paint['text-color'], properties, zoom);
+            let textOpacity = this.evalSymbolPaint(paint['text-opacity'], properties, zoom);
+            if (textOpacity === undefined || textOpacity === '') {
+                textOpacity = 1;
+            }
+            const textHaloColor = this.evalSymbolPaint(paint['text-halo-color'], properties, zoom);
+            let textHaloWidth = this.evalSymbolPaint(paint['text-halo-width'], properties, zoom);
             const textHaloBlur = paint['text-halo-blur'];
-            
-            // Don't render if text color is not defined (might be intentionally hidden)
-            if (!textColor && !textHaloColor) {
+
+            if (typeof textHaloWidth === 'number' && textHaloWidth > 0) {
+                textHaloWidth *= 1.12;
+            }
+
+            // Allow faint/neutral label colours once evaluated (some styles omit explicit fill)
+            if ((textColor === undefined || textColor === '') && !textHaloColor) {
                 return null;
+            }
+            if (textColor === undefined || textColor === '') {
+                textColor = '#333333';
             }
             
             // Initialize font manager and process fonts
@@ -671,21 +809,21 @@ class FeatureConverter {
             let measureFontFamily = 'Arial, sans-serif';
             
             if (layout['text-font'] && Array.isArray(layout['text-font'])) {
-                // Log detected font for user reference
                 if (!this._loggedFonts) this._loggedFonts = new Set();
-                const fontKey = layout['text-font'].join(',');
+                const mapboxFontNames =
+                    FontManager.resolveTextFontStack(layout['text-font'], properties, zoom)
+                    || ['DIN Pro Regular', 'Arial Unicode MS Regular'];
+                const fontKey = mapboxFontNames.join('|');
                 if (!this._loggedFonts.has(fontKey)) {
-                    console.log(`🔤 DETECTED MAPBOX FONT: [${layout['text-font'].join(', ')}]`);
+                    console.log(`🔤 DETECTED MAPBOX FONT: [${mapboxFontNames.join(', ')}]`);
                     this._loggedFonts.add(fontKey);
                 }
-                
-                // Track this font for embedding in SVG
+
                 this.usedFonts.add({
-                    mapboxFontNames: layout['text-font']
+                    mapboxFontNames,
                 });
-                
-                // Process fonts for SVG use
-                const processedFont = fontManager.processMapboxFonts(layout['text-font']);
+
+                const processedFont = fontManager.processMapboxFonts(mapboxFontNames);
                 fontFamily = processedFont.fontFamily;
                 fontWeight = processedFont.fontWeight;
                 fontStyle = processedFont.fontStyle;
@@ -700,7 +838,7 @@ class FeatureConverter {
             // spacing that will end up in the SVG so the export matches
             // what Mapbox lays out.
             const textMaxWidth = layout['text-max-width'];
-            const textLetterSpacing = typeof layout['text-letter-spacing'] === 'number' ? layout['text-letter-spacing'] : 0;
+            const textLetterSpacing = this.evalTextLetterSpacing(layout, properties, zoom);
             const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
                 measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
             });
@@ -742,13 +880,14 @@ class FeatureConverter {
                 finalFillOpacity !== undefined ? `fill-opacity="${finalFillOpacity}"` : ''
             ].filter(Boolean).join(' ');
 
-            const hasHalo = textHaloWidth && textHaloWidth > 0 && textHaloColor;
+            const hasHalo = Number(textHaloWidth) > 0 && textHaloColor;
             const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
 
             let textElement;
             if (hasHalo) {
                 const halo = this.resolveHaloPaint(textHaloColor);
-                const haloAttrs = `stroke="${halo.color}" stroke-width="${textHaloWidth * 2}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
+                const hw = Number(textHaloWidth);
+                const haloAttrs = `stroke="${halo.color}" stroke-width="${(hw * 2).toFixed(2)}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
 
                 if (haloBlurFilter) {
                     // Two-pass: blurred halo behind, sharp fill on top. This
@@ -767,6 +906,18 @@ class FeatureConverter {
                 }
             } else {
                 textElement = `<text ${baseAttrs} ${fillAttrs}>${innerContent}</text>`;
+            }
+
+            if (exportTagKey) {
+                const esc = ExportUtilities.escapeXmlAttr(exportTagKey);
+                if (/^<g class="label">/.test(textElement)) {
+                    textElement = textElement.replace(
+                        /^<g class="label">/,
+                        `<g class="label" data-export-symbol-key="${esc}">`
+                    );
+                } else {
+                    textElement = `<g data-export-symbol-key="${esc}">${textElement}</g>`;
+                }
             }
             
             // ENHANCED: For text-only marker features, add a circle background
@@ -1016,10 +1167,12 @@ class FeatureConverter {
             }
             
             // CRITICAL FIX: Convert to screen coordinates BEFORE calculating angle
-            const screenX1 = projection.lngToX(point1[0]);
-            const screenY1 = projection.latToY(point1[1]);
-            const screenX2 = projection.lngToX(point2[0]);
-            const screenY2 = projection.latToY(point2[1]);
+            const p1 = this.lngLatToXY(projection, point1[0], point1[1]);
+            const p2 = this.lngLatToXY(projection, point2[0], point2[1]);
+            const screenX1 = p1.x;
+            const screenY1 = p1.y;
+            const screenX2 = p2.x;
+            const screenY2 = p2.y;
             
             // Calculate angle in degrees using screen coordinates
             const deltaX = screenX2 - screenX1;
@@ -1049,20 +1202,32 @@ class FeatureConverter {
         }
         
         // Convert to SVG coordinates
-        const x = projection.lngToX(centerCoord[0]);
-        const y = projection.latToY(centerCoord[1]);
-        
+        const centerPx = this.lngLatToXY(projection, centerCoord[0], centerCoord[1]);
+        const x = centerPx.x;
+        const y = centerPx.y;
+
+        const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
+        if (!ExportUtilities.isSymbolLayoutVisible(layout, properties, zoom, 'LineString')) {
+            return null;
+        }
+
         // Get the text to display
         let text;
         if (layout['text-field']) {
-            text = ExportUtilities.evaluateExpression(layout['text-field'], properties);
-        } else if (properties.name) {
-            text = properties.name;
-        } else if (properties.text) {
-            text = properties.text;
+            text = ExportUtilities.evaluateExpression(layout['text-field'], {
+                ...properties,
+                zoom,
+                $geometryType: 'LineString',
+            });
+        }
+        if (!text || String(text).trim() === '') {
+            text = ExportUtilities.resolveLocalizedPlaceName(properties);
+        }
+        if (!text || String(text).trim() === '') {
+            text = properties.name || properties.text;
         }
         
-        if (!text || text.trim() === '') {
+        if (!text || String(text).trim() === '') {
             return null;
         }
         
@@ -1077,15 +1242,23 @@ class FeatureConverter {
         // Get styling properties with better defaults and evaluate font size expressions
         let fontSize = layout['text-size'] || 14;
         if (fontSize && typeof fontSize === 'object') {
-            // Font size is an expression - evaluate it with zoom context
-            const zoom = projection.getZoom ? projection.getZoom() : (window.gpxApp?.mapManager?.getMap()?.getZoom() || 12);
             fontSize = ExportUtilities.evaluateExpression(fontSize, { ...properties, zoom });
         }
-        const textColor = paint['text-color'] || '#000000';
-        const textOpacity = paint['text-opacity'] !== undefined ? paint['text-opacity'] : 1;
-        const textHaloColor = paint['text-halo-color'];
-        const textHaloWidth = paint['text-halo-width'] || 0;
+        let textColor = this.evalSymbolPaint(paint['text-color'], properties, zoom);
+        let textOpacity = this.evalSymbolPaint(paint['text-opacity'], properties, zoom);
+        if (textOpacity === undefined || textOpacity === '') {
+            textOpacity = 1;
+        }
+        const textHaloColor = this.evalSymbolPaint(paint['text-halo-color'], properties, zoom);
+        let textHaloWidth = this.evalSymbolPaint(paint['text-halo-width'], properties, zoom);
         const textHaloBlur = paint['text-halo-blur'];
+
+        if (typeof textHaloWidth === 'number' && textHaloWidth > 0) {
+            textHaloWidth *= 1.12;
+        }
+        if (textColor === undefined || textColor === '') {
+            textColor = '#000000';
+        }
         
         // Initialize font manager and process fonts
         const fontManager = this.initializeFontManager();
@@ -1095,21 +1268,21 @@ class FeatureConverter {
         let measureFontFamily = 'Arial, sans-serif';
         
         if (layout['text-font'] && Array.isArray(layout['text-font'])) {
-            // Log detected font for user reference
             if (!this._loggedFonts) this._loggedFonts = new Set();
-            const fontKey = layout['text-font'].join(',');
+            const mapboxFontNames =
+                FontManager.resolveTextFontStack(layout['text-font'], properties, zoom)
+                || ['DIN Pro Regular', 'Arial Unicode MS Regular'];
+            const fontKey = mapboxFontNames.join('|');
             if (!this._loggedFonts.has(fontKey)) {
-                console.log(`🔤 DETECTED MAPBOX FONT: [${layout['text-font'].join(', ')}]`);
+                console.log(`🔤 DETECTED MAPBOX FONT: [${mapboxFontNames.join(', ')}]`);
                 this._loggedFonts.add(fontKey);
             }
-            
-            // Track this font for embedding in SVG
+
             this.usedFonts.add({
-                mapboxFontNames: layout['text-font']
+                mapboxFontNames,
             });
-            
-            // Process fonts for SVG use
-            const processedFont = fontManager.processMapboxFonts(layout['text-font']);
+
+            const processedFont = fontManager.processMapboxFonts(mapboxFontNames);
             fontFamily = processedFont.fontFamily;
             fontWeight = processedFont.fontWeight;
             fontStyle = processedFont.fontStyle;
@@ -1118,7 +1291,7 @@ class FeatureConverter {
         
                 // Check for text wrapping based on text-max-width
         const textMaxWidth = layout['text-max-width'];
-        const textLetterSpacing = typeof layout['text-letter-spacing'] === 'number' ? layout['text-letter-spacing'] : 0;
+        const textLetterSpacing = this.evalTextLetterSpacing(layout, properties, zoom);
         const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
             measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
         });
@@ -1150,12 +1323,13 @@ class FeatureConverter {
 
         const fillAttrs = `fill="${textColor}" fill-opacity="${textOpacity}"`;
 
-        const hasHalo = textHaloWidth > 0 && textHaloColor;
+        const hasHalo = Number(textHaloWidth) > 0 && textHaloColor;
         const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
 
         if (hasHalo) {
             const halo = FeatureConverter.resolveHaloPaint(textHaloColor);
-            const haloAttrs = `stroke="${halo.color}" stroke-width="${(textHaloWidth * 2).toFixed(1)}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
+            const hw = Number(textHaloWidth);
+            const haloAttrs = `stroke="${halo.color}" stroke-width="${(hw * 2).toFixed(1)}" stroke-opacity="${halo.opacity}" stroke-linejoin="round"`;
 
             if (haloBlurFilter) {
                 return `<g class="line-label">`

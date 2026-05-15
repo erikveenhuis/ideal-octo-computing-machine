@@ -87,13 +87,16 @@ global.HTMLCanvasElement = dom.window.HTMLCanvasElement;
 const FONT_DIR = path.join(REPO_ROOT, 'static', 'fonts', 'DIN Pro');
 const REGULAR_OTF = path.join(FONT_DIR, 'dinpro.otf');
 const BOLD_OTF = path.join(FONT_DIR, 'dinpro_bold.otf');
+const MEDIUM_OTF = path.join(FONT_DIR, 'dinpro_medium.otf');
 
 global.fetch = async (url) => {
     let p;
-    if (typeof url === 'string' && url.endsWith('dinpro.otf')) {
-        p = REGULAR_OTF;
-    } else if (typeof url === 'string' && url.endsWith('dinpro_bold.otf')) {
+    if (typeof url === 'string' && url.endsWith('dinpro_bold.otf')) {
         p = BOLD_OTF;
+    } else if (typeof url === 'string' && url.endsWith('dinpro_medium.otf')) {
+        p = MEDIUM_OTF;
+    } else if (typeof url === 'string' && url.endsWith('dinpro.otf')) {
+        p = REGULAR_OTF;
     } else {
         throw new Error(`unexpected fetch URL: ${url}`);
     }
@@ -113,9 +116,9 @@ const _origLog = console.log;
 console.log = () => {};
 process.on('exit', () => { console.log = _origLog; });
 
+global.ExportUtilities = require('../static/js/components/export-utilities.js');
 global.FontManager = require('../static/js/components/font-manager.js');
 global.MapProjection = require('../static/js/components/map-projection.js');
-global.ExportUtilities = require('../static/js/components/export-utilities.js');
 global.FeatureConverter = require('../static/js/components/feature-converter.js');
 global.OverlayCutExtractor = require('../static/js/components/overlay-cut-extractor.js');
 // SVGRenderer always runs the outline pass now, so opentype.js + the
@@ -126,6 +129,8 @@ global.window.opentype = global.opentype;
 global.TextOutliner = require('../static/js/components/text-outliner.js');
 const SVGRenderer = require('../static/js/components/svg-renderer.js');
 const FeatureConverter = global.FeatureConverter;
+const SVGExporter = require('../static/js/components/svg-exporter.js');
+global.SVGExporter = SVGExporter;
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -187,6 +192,185 @@ function makeFakeMap() {
         getStyle: () => ({ layers: [] }),
     };
 }
+
+test('ExportUtilities: Dutch place properties + format expressions resolve for export', () => {
+    const EU = global.ExportUtilities;
+    assert.equal(
+        EU.resolveLocalizedPlaceName({ name_nl: 'Het Lage Land', name_en: 'The Low Land' }),
+        'Het Lage Land'
+    );
+    assert.equal(
+        EU.evaluateExpression(
+            ['format', ['get', 'name_nl'], {}, ' — ', {}, ['get', 'name'], {}],
+            { name_nl: 'Rotterdam-Noord', name: 'Alt', zoom: 12 }
+        ),
+        'Rotterdam-Noord — Alt'
+    );
+    const dedupe = EU.symbolLabelDedupeKey({
+        layer: { id: 'place-neighbourhood', type: 'symbol' },
+        sourceLayer: 'place_label',
+        geometry: { type: 'Point', coordinates: [4.51, 51.93] },
+        properties: { name_nl: 'Oud-Charlois' },
+    });
+    assert.ok(dedupe && dedupe.endsWith('|Oud-Charlois'), `unexpected dedupe key: ${dedupe}`);
+});
+
+test('ExportUtilities: match + zoom expressions', () => {
+    const EU = global.ExportUtilities;
+    assert.equal(
+        EU.evaluateExpression(
+            ['match', ['get', 'class'], 'neighbourhood', 'yes', 'no'],
+            { class: 'neighbourhood', zoom: 12 }
+        ),
+        'yes'
+    );
+    assert.equal(EU.evaluateExpression(['zoom'], { zoom: 14.2 }), 14.2);
+});
+
+test('ExportUtilities: symplace dedupe uses evaluated text-field (not property precedence alone)', () => {
+    const EU = global.ExportUtilities;
+    const city = {
+        layer: {
+            type: 'symbol',
+            id: 'place-test-city',
+            layout: { 'text-field': ['get', 'name'] },
+        },
+        sourceLayer: 'place_label',
+        geometry: { type: 'Point', coordinates: [4.52, 51.92] },
+        properties: { name: 'Rotterdam', name_nl: 'Rotterdam-Noord' },
+    };
+    const k = EU.symbolPlacementDedupeKey(city, 12);
+    assert.ok(k && k.includes('|Rotterdam'), `expected Rotterdam from text-field, got ${k}`);
+    assert.ok(!k.includes('|Rotterdam-Noord'), `should not use name_nl when text-field is name: ${k}`);
+});
+
+test('ExportUtilities: case + in(class) picks branch like Mapbox place labels', () => {
+    const EU = global.ExportUtilities;
+    const expr = [
+        'case',
+        ['in', ['get', 'class'], ['literal', ['neighbourhood', 'suburb']]],
+        ['get', 'name_nl'],
+        ['get', 'name'],
+    ];
+    assert.equal(
+        EU.evaluateExpression(expr, {
+            zoom: 12,
+            class: 'neighbourhood',
+            name_nl: 'Rotterdam-Noord',
+            name: 'Rotterdam',
+        }),
+        'Rotterdam-Noord'
+    );
+});
+
+test('FontManager: resolveTextFontStack evaluates step on zoom', () => {
+    const FM = global.FontManager;
+    const tf = [
+        'step',
+        ['zoom'],
+        ['literal', ['DIN Pro Regular', 'Arial Unicode MS Regular']],
+        11,
+        ['literal', ['DIN Pro Bold', 'Arial Unicode MS Bold']],
+    ];
+    const low = FM.resolveTextFontStack(tf, {}, 10);
+    const high = FM.resolveTextFontStack(tf, {}, 12);
+    assert.ok(low && low[0].includes('Regular'), low && low.join(','));
+    assert.ok(high && high[0].includes('Bold'), high && high.join(','));
+});
+
+test('FontManager: Standard concat + config font resolves per-slot stack', () => {
+    const FM = global.FontManager;
+    const EU = global.ExportUtilities;
+    EU.setEvalImportConfig({ font: 'DIN Pro' });
+    try {
+        const tf = [
+            ['concat', ['config', 'font'], ' Medium'],
+            'Arial Unicode MS Bold',
+        ];
+        const stack = FM.resolveTextFontStack(tf, {}, 12);
+        assert.equal(stack[0], 'DIN Pro Medium');
+        const proc = new FM().processMapboxFonts(stack);
+        assert.equal(proc.fontWeight, '500');
+    } finally {
+        EU.clearEvalImportConfig();
+    }
+});
+
+test('ExportUtilities: layout visibility honors import config', () => {
+    const EU = global.ExportUtilities;
+    const layout = {
+        visibility: ['case', ['config', 'showPlaceLabels'], 'visible', 'none'],
+    };
+    EU.setEvalImportConfig({ showPlaceLabels: false });
+    try {
+        assert.equal(EU.isSymbolLayoutVisible(layout, {}, 12, 'Point'), false);
+    } finally {
+        EU.clearEvalImportConfig();
+    }
+    EU.setEvalImportConfig({ showPlaceLabels: true });
+    try {
+        assert.equal(EU.isSymbolLayoutVisible(layout, {}, 12, 'Point'), true);
+    } finally {
+        EU.clearEvalImportConfig();
+    }
+});
+
+test('ExportUtilities: Standard-style visibility with measure-light compares', () => {
+    const EU = global.ExportUtilities;
+    const layout = {
+        visibility: [
+            'case',
+            ['>', ['measure-light', 'brightness'], 0.5],
+            'visible',
+            'none',
+        ],
+    };
+    assert.equal(EU.isSymbolLayoutVisible(layout, {}, 12, 'Point'), true);
+});
+
+test('FeatureConverter: evalTextLetterSpacing reads literals and expressions', () => {
+    assert.equal(FeatureConverter.evalTextLetterSpacing({}, {}, 12), 0);
+    assert.equal(FeatureConverter.evalTextLetterSpacing(null, {}, 12), 0);
+    assert.equal(
+        FeatureConverter.evalTextLetterSpacing({ 'text-letter-spacing': 0.08 }, {}, 12),
+        0.08
+    );
+    const layout = {
+        'text-letter-spacing': ['*', ['literal', 2], ['literal', 0.04]],
+    };
+    assert.ok(Math.abs(FeatureConverter.evalTextLetterSpacing(layout, {}, 12) - 0.08) < 1e-9);
+});
+
+test('ExportUtilities: visibility within predicate defaults open (viewport parity)', () => {
+    const EU = global.ExportUtilities;
+    const layout = {
+        visibility: [
+            'case',
+            ['within', ['literal', { type: 'Polygon', coordinates: [] }]],
+            'visible',
+            'none',
+        ],
+    };
+    assert.equal(EU.isSymbolLayoutVisible(layout, {}, 12, 'Point'), true);
+});
+
+test('ExportUtilities: exportUniqueSymbolKey buckets place-like layers', () => {
+    const EU = global.ExportUtilities;
+    const placeLike = {
+        layer: { id: 'place-neighbourhood', type: 'symbol' },
+        sourceLayer: 'place_label',
+        geometry: { type: 'Point', coordinates: [4.51, 51.93] },
+        properties: { name_nl: 'Oud-Charlois' },
+    };
+    assert.match(EU.exportUniqueSymbolKey(placeLike), /^symplace:/);
+    const roadShield = {
+        layer: { id: 'road-shield', type: 'symbol' },
+        sourceLayer: 'road',
+        geometry: { type: 'Point', coordinates: [4.5, 51.9] },
+        properties: { ref: 'A15', name: 'x' },
+    };
+    assert.match(EU.exportUniqueSymbolKey(roadShield), /^sym:/);
+});
 
 function makeBounds() {
     // Rotterdam-ish bounds; MapProjection.create is fed via the
