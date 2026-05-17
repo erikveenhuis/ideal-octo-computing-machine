@@ -490,7 +490,7 @@ ${svgBody}</svg>`;
      * had no value in print / cutter workflows.
      */
     static _buildHaloFilterDefs() {
-        const blurValues = [0.3, 0.6, 1.0, 1.5, 2.0];
+        const blurValues = [0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
         const haloFilters = blurValues.map(v => `    <filter id="halo-blur-${v.toString().replace('.', '_')}" x="-25%" y="-25%" width="150%" height="150%">
       <feGaussianBlur stdDeviation="${v}"/>
     </filter>`).join('\n');

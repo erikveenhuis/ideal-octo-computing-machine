@@ -486,6 +486,54 @@ test('SVG letter-spacing is honoured when outlining basemap-style labels', async
     );
 });
 
+test('halo pass (fill=none + stroke) survives outlining as stroked paths', async () => {
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', '10');
+    t.setAttribute('y', '50');
+    t.setAttribute('font-family', 'DIN Pro');
+    t.setAttribute('font-size', '36');
+    t.setAttribute('font-weight', '700');
+    t.setAttribute('fill', 'none');
+    t.setAttribute('stroke', '#ffffff');
+    t.setAttribute('stroke-width', '6');
+    t.setAttribute('stroke-linejoin', 'round');
+    t.textContent = 'R';
+
+    const svg = wrapSvg(t);
+    await TextOutliner.outlineSvgTextNodes(svg);
+
+    const path = svg.querySelector('path');
+    assert.ok(path, 'halo-only label must outline to a path');
+    assert.equal(path.getAttribute('fill'), 'none');
+    assert.equal(path.getAttribute('stroke'), '#ffffff');
+    assert.ok(Number(path.getAttribute('stroke-width')) >= 6);
+});
+
+test('paint-order stroke fill emits halo stroke path then fill path', async () => {
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', '10');
+    t.setAttribute('y', '50');
+    t.setAttribute('font-family', 'DIN Pro');
+    t.setAttribute('font-size', '28');
+    t.setAttribute('font-weight', '700');
+    t.setAttribute('fill', '#222222');
+    t.setAttribute('stroke', '#ffffff');
+    t.setAttribute('stroke-width', '4');
+    t.setAttribute('paint-order', 'stroke fill');
+    t.textContent = 'Z';
+
+    const svg = wrapSvg(t);
+    await TextOutliner.outlineSvgTextNodes(svg);
+
+    const paths = svg.querySelectorAll('path');
+    assert.equal(paths.length, 2, 'stroke + fill should yield two paths');
+    assert.equal(paths[0].getAttribute('fill'), 'none');
+    assert.ok(paths[0].getAttribute('stroke'));
+    assert.ok(!paths[1].getAttribute('stroke'),
+        'top fill path should not repeat halo stroke');
+    assert.ok(paths[1].getAttribute('fill'));
+});
+
 test('<tspan> without font-weight inherits bold from parent <text>', async () => {
     function mkBoldSingleLine() {
         const t = document.createElementNS(SVG_NS, 'text');

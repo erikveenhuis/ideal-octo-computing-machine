@@ -110,7 +110,15 @@ class FeatureConverter {
             case 'LineString':
                 // Check if this is actually a label rendered as a line
                 if (this.isLabelFeature(layer, layout, properties)) {
-                    return this.lineStringLabelToSVG(geometry.coordinates, properties, paint, layout, projection, layerId);
+                    return this.lineStringLabelToSVG(
+                        geometry.coordinates,
+                        properties,
+                        paint,
+                        layout,
+                        projection,
+                        layerId,
+                        sourceLayer || ''
+                    );
                 } else {
                     return this.lineStringToSVG(geometry.coordinates, paint, projection, layerId, map);
                 }
@@ -131,7 +139,8 @@ class FeatureConverter {
                     projection,
                     layerId,
                     exportSymbolKey,
-                    'Point'
+                    'Point',
+                    sourceLayer || ''
                 );
             }
 
@@ -151,7 +160,8 @@ class FeatureConverter {
                     projection,
                     layerId,
                     exportSymbolKey,
-                    'MultiPoint'
+                    'MultiPoint',
+                    sourceLayer || ''
                 );
             }
             
@@ -644,7 +654,17 @@ class FeatureConverter {
         return polygonElement;
     }
 
-    static pointToSVG(coordinates, properties, paint, layout, projection, layerId = null, exportSymbolKey = null, geometryType = 'Point') {
+    static pointToSVG(
+        coordinates,
+        properties,
+        paint,
+        layout,
+        projection,
+        layerId = null,
+        exportSymbolKey = null,
+        geometryType = 'Point',
+        sourceLayer = ''
+    ) {
         // Skip the marker-labels companion of marker-circles. Both Mapbox
         // layers emit a feature for every endpoint (start/finish), so without
         // this guard each route exported two stacked <g class="marker">
@@ -787,11 +807,20 @@ class FeatureConverter {
             }
             const textHaloColor = this.evalSymbolPaint(paint['text-halo-color'], properties, zoom);
             let textHaloWidth = this.evalSymbolPaint(paint['text-halo-width'], properties, zoom);
-            const textHaloBlur = paint['text-halo-blur'];
+            const textHaloBlur = this.evalSymbolPaint(paint['text-halo-blur'], properties, zoom);
 
             if (typeof textHaloWidth === 'number' && textHaloWidth > 0) {
                 textHaloWidth *= 1.12;
             }
+
+            const { haloBlurForFilter, textHaloWidth: scaledHaloWidth } =
+                FeatureConverter.computeHaloBlurAndWidthForPlaceExport(
+                    layerId,
+                    properties,
+                    textHaloBlur,
+                    textHaloWidth
+                );
+            textHaloWidth = scaledHaloWidth;
 
             // Allow faint/neutral label colours once evaluated (some styles omit explicit fill)
             if ((textColor === undefined || textColor === '') && !textHaloColor) {
@@ -800,7 +829,7 @@ class FeatureConverter {
             if (textColor === undefined || textColor === '') {
                 textColor = '#333333';
             }
-            
+
             // Initialize font manager and process fonts
             const fontManager = this.initializeFontManager();
             let fontFamily = 'Arial, sans-serif';
@@ -829,9 +858,19 @@ class FeatureConverter {
                 fontStyle = processedFont.fontStyle;
                 measureFontFamily = processedFont.measureFontFamily;
             }
-            
-            
-            
+
+            ({
+                textColor,
+                textOpacity,
+            } = FeatureConverter.softPrimaryCityPlaceFill(
+                textColor,
+                textOpacity,
+                layerId,
+                properties,
+                sourceLayer,
+                fontWeight
+            ));
+
             // Check for text wrapping based on text-max-width.
             // Wrap decisions are driven by the actual rendered text width,
             // measured with the same font family/weight/style + letter
@@ -881,7 +920,9 @@ class FeatureConverter {
             ].filter(Boolean).join(' ');
 
             const hasHalo = Number(textHaloWidth) > 0 && textHaloColor;
-            const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
+            const haloBlurFilter = hasHalo
+                ? FeatureConverter.pickHaloBlurFilterId(haloBlurForFilter)
+                : null;
 
             let textElement;
             if (hasHalo) {
@@ -1092,6 +1133,157 @@ class FeatureConverter {
     }
 
     /**
+     * Neighbourhood / subdivision placenames should stay crisp relative to primary cities.
+     * Used to avoid treating them as “major” for halo bias / primary-city fill softening.
+     */
+    static _placeLabelSubdivisionLike(properties, layerId) {
+        const p = properties || {};
+        const cls = typeof p.class === 'string' ? p.class.toLowerCase() : '';
+        if (
+            cls === 'settlement_subdivision' ||
+            cls === 'neighbourhood' ||
+            cls === 'quarter' ||
+            cls === 'block' ||
+            cls === 'microhood'
+        ) {
+            return true;
+        }
+        const lid = layerId ? String(layerId).toLowerCase() : '';
+        return /subdivision|neighbourhood|microhood/i.test(lid);
+    }
+
+    /**
+     * Major settlement / city labels (Mapbox Standard `settlement-major-*`,
+     * ``place_label.class`` ``settlement`` / ``city`` / ``town``, …) use bolder DIN
+     * and thicker halos on the canvas; neighbourhood subdivisions use Medium weight.
+     */
+    static isMajorSettlementPlaceLabel(layerId, properties) {
+        if (FeatureConverter._placeLabelSubdivisionLike(properties, layerId)) {
+            return false;
+        }
+        const lid = layerId ? String(layerId).toLowerCase() : '';
+        if (
+            /settlement-major|settlement_major|major-place|place-city|locality-major|capital-city|city-lg|town-lg|settlement-lg|metropolis|urban[_-]area/i.test(
+                lid
+            )
+        ) {
+            return true;
+        }
+        const p = properties || {};
+        const cls = typeof p.class === 'string' ? p.class.toLowerCase() : '';
+        if (
+            cls === 'settlement' ||
+            cls === 'disputed_settlement' ||
+            cls === 'admin_capital' ||
+            cls === 'capital_city' ||
+            cls === 'city' ||
+            cls === 'town' ||
+            cls === 'large_settlement' ||
+            cls === 'metropolis'
+        ) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * After the generic halo-width scale (×1.12), bias blur and widen halo for major
+     * settlement labels so discrete Gaussian presets align better with Mapbox SDF.
+     */
+    static computeHaloBlurAndWidthForPlaceExport(layerId, properties, textHaloBlur, textHaloWidthScaled12) {
+        let haloBlurForFilter = Number(textHaloBlur);
+        if (!Number.isFinite(haloBlurForFilter) || haloBlurForFilter < 0) {
+            haloBlurForFilter = 0;
+        }
+        let w = textHaloWidthScaled12;
+        if (FeatureConverter.isMajorSettlementPlaceLabel(layerId, properties)) {
+            haloBlurForFilter += 0.65;
+            if (typeof w === 'number' && w > 0) {
+                w *= 1.08;
+            }
+        }
+        return { haloBlurForFilter, textHaloWidth: w };
+    }
+
+    /**
+     * How aggressively to ease outlined fills toward mid-grey (0 = skip).
+     * Combines tile/schema-based majors with heavy DIN Bold place labels that are not subdivisions.
+     */
+    static primaryCityFillSoftenStrength(layerId, properties, sourceLayer, cssFontWeight) {
+        if (FeatureConverter._placeLabelSubdivisionLike(properties, layerId)) {
+            return 0;
+        }
+        const s = String(cssFontWeight ?? '400').toLowerCase();
+        let wnum = 400;
+        if (/\bbold\b/.test(s) || /\bbolder\b/.test(s)) {
+            wnum = 700;
+        } else {
+            const n = parseInt(s, 10);
+            if (Number.isFinite(n)) {
+                wnum = n;
+            }
+        }
+
+        if (FeatureConverter.isMajorSettlementPlaceLabel(layerId, properties)) {
+            return wnum >= 650 ? 1 : 0.88;
+        }
+
+        const sl = sourceLayer ? String(sourceLayer) : '';
+        if (sl === 'place_label' && wnum >= 650) {
+            return 0.58;
+        }
+        return 0;
+    }
+
+    /**
+     * Mapbox SDF labels carry a soft fringe; outlined SVG glyphs read harsh especially for
+     * bold near-black primaries. Blend dark fills toward charcoal and trim opacity slightly.
+     */
+    static softPrimaryCityPlaceFill(textColor, textOpacity, layerId, properties, sourceLayer, cssFontWeight) {
+        const strength = FeatureConverter.primaryCityFillSoftenStrength(
+            layerId,
+            properties,
+            sourceLayer,
+            cssFontWeight
+        );
+        if (strength <= 0) {
+            return { textColor, textOpacity };
+        }
+
+        const trimmed = typeof textColor === 'string' ? textColor.trim() : String(textColor);
+        const c = ExportUtilities.parseCssColorToRgb(trimmed);
+        if (!c || !Number.isFinite(c.a) || c.a < 0.97) {
+            return { textColor, textOpacity };
+        }
+
+        const avg = (c.r + c.g + c.b) / 3;
+        if (avg >= 128) {
+            return { textColor, textOpacity };
+        }
+
+        let baseMix;
+        if (avg < 18) baseMix = 0.30;
+        else if (avg < 40) baseMix = 0.23;
+        else if (avg < 70) baseMix = 0.165;
+        else if (avg < 100) baseMix = 0.10;
+        else baseMix = 0.055;
+
+        const mix = Math.min(0.42, baseMix * strength);
+
+        const r = Math.round(c.r + (255 - c.r) * mix);
+        const g = Math.round(c.g + (255 - c.g) * mix);
+        const b = Math.round(c.b + (255 - c.b) * mix);
+
+        let op = Number(textOpacity);
+        if (!Number.isFinite(op)) {
+            op = 1;
+        }
+        op = Math.min(1, op * (1 - 0.055 * strength));
+
+        return { textColor: `rgb(${r},${g},${b})`, textOpacity: op };
+    }
+
+    /**
      * Pick the closest halo-blur filter id that SVGRenderer pre-defines.
      *
      * Whenever a halo is present, we apply at least a small amount of blur
@@ -1101,7 +1293,7 @@ class FeatureConverter {
      * which is the "harsher / sharper" look users see in exports.
      *
      * The filter ids correspond to the blurValues list in
-     * SVGRenderer._buildHaloFilterDefs.
+     * SVGRenderer._buildHaloFilterDefs (keep arrays in sync).
      */
     static pickHaloBlurFilterId(haloBlurPx) {
         const MIN_HALO_BLUR_PX = 0.3;
@@ -1109,7 +1301,7 @@ class FeatureConverter {
         if (!isFinite(value) || value < 0) value = 0;
         value = Math.max(value, MIN_HALO_BLUR_PX);
 
-        const choices = [0.3, 0.6, 1.0, 1.5, 2.0];
+        const choices = [0.3, 0.6, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
         let best = choices[0];
         let bestDelta = Math.abs(value - best);
         for (const c of choices) {
@@ -1139,7 +1331,15 @@ class FeatureConverter {
     }
 
     // ENHANCED: Convert LineString labels to SVG text positioned at the line center
-    static lineStringLabelToSVG(coordinates, properties, paint, layout, projection, layerId = null) {
+    static lineStringLabelToSVG(
+        coordinates,
+        properties,
+        paint,
+        layout,
+        projection,
+        layerId = null,
+        sourceLayer = ''
+    ) {
         // Calculate the center point of the LineString for label placement
         if (!coordinates || coordinates.length === 0) {
             return null;
@@ -1251,15 +1451,25 @@ class FeatureConverter {
         }
         const textHaloColor = this.evalSymbolPaint(paint['text-halo-color'], properties, zoom);
         let textHaloWidth = this.evalSymbolPaint(paint['text-halo-width'], properties, zoom);
-        const textHaloBlur = paint['text-halo-blur'];
+        const textHaloBlur = this.evalSymbolPaint(paint['text-halo-blur'], properties, zoom);
 
         if (typeof textHaloWidth === 'number' && textHaloWidth > 0) {
             textHaloWidth *= 1.12;
         }
+
+        const { haloBlurForFilter, textHaloWidth: scaledLineHaloWidth } =
+            FeatureConverter.computeHaloBlurAndWidthForPlaceExport(
+                layerId,
+                properties,
+                textHaloBlur,
+                textHaloWidth
+            );
+        textHaloWidth = scaledLineHaloWidth;
+
         if (textColor === undefined || textColor === '') {
             textColor = '#000000';
         }
-        
+
         // Initialize font manager and process fonts
         const fontManager = this.initializeFontManager();
         let fontFamily = 'Arial, sans-serif';
@@ -1288,8 +1498,20 @@ class FeatureConverter {
             fontStyle = processedFont.fontStyle;
             measureFontFamily = processedFont.measureFontFamily;
         }
-        
-                // Check for text wrapping based on text-max-width
+
+        ({
+            textColor,
+            textOpacity,
+        } = FeatureConverter.softPrimaryCityPlaceFill(
+            textColor,
+            textOpacity,
+            layerId,
+            properties,
+            sourceLayer,
+            fontWeight
+        ));
+
+        // Check for text wrapping based on text-max-width
         const textMaxWidth = layout['text-max-width'];
         const textLetterSpacing = this.evalTextLetterSpacing(layout, properties, zoom);
         const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
@@ -1324,7 +1546,9 @@ class FeatureConverter {
         const fillAttrs = `fill="${textColor}" fill-opacity="${textOpacity}"`;
 
         const hasHalo = Number(textHaloWidth) > 0 && textHaloColor;
-        const haloBlurFilter = hasHalo ? FeatureConverter.pickHaloBlurFilterId(textHaloBlur) : null;
+        const haloBlurFilter = hasHalo
+            ? FeatureConverter.pickHaloBlurFilterId(haloBlurForFilter)
+            : null;
 
         if (hasHalo) {
             const halo = FeatureConverter.resolveHaloPaint(textHaloColor);

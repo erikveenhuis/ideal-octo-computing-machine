@@ -116,6 +116,45 @@ class ExportUtilities {
     }
 
     /**
+     * Parse common SVG/CSS colour strings for export-time adjustments.
+     * Returns sRGB channels in 0–255 and alpha in 0–1, or null if unsupported.
+     */
+    static parseCssColorToRgb(css) {
+        if (typeof css !== 'string') return null;
+        const s = css.trim();
+        let m = /^#([0-9a-f]{3})$/i.exec(s);
+        if (m) {
+            const h = m[1];
+            return {
+                r: parseInt(h[0] + h[0], 16),
+                g: parseInt(h[1] + h[1], 16),
+                b: parseInt(h[2] + h[2], 16),
+                a: 1,
+            };
+        }
+        m = /^#([0-9a-f]{6})$/i.exec(s);
+        if (m) {
+            const h = m[1];
+            return {
+                r: parseInt(h.slice(0, 2), 16),
+                g: parseInt(h.slice(2, 4), 16),
+                b: parseInt(h.slice(4, 6), 16),
+                a: 1,
+            };
+        }
+        m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(s);
+        if (m) {
+            return {
+                r: Math.round(Number(m[1])),
+                g: Math.round(Number(m[2])),
+                b: Math.round(Number(m[3])),
+                a: m[4] !== undefined ? Number(m[4]) : 1,
+            };
+        }
+        return null;
+    }
+
+    /**
      * Default Mapbox Standard-style import.config keys used in expressions
      * (visibility gates, concat(["config","font"], " Medium"), …).
      * SVGExporter merges style.imports[].config over this for each export.

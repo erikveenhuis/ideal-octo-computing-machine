@@ -108,8 +108,12 @@ class TextOutliner {
      *   - per-tspan x/y placement (applied to each glyph path)
      *   - text-anchor (computed against the rendered string width)
      *   - font-size, font-weight, fill (resolved from inline ``style``,
-     *     dedicated attributes, or inherited from the parent <text> when a
-     *     <tspan> omits them — sparse paint attrs prevent bold/fill loss)
+ *     dedicated attributes, or inherited from the parent <text> when a
+ *     <tspan> omits them — sparse paint attrs prevent bold/fill loss)
+ *   - ``stroke`` / ``stroke-width`` / ``stroke-opacity`` / ``paint-order``
+ *     so halo passes (``fill="none"`` + blurred stroke) survive conversion
+ *     to glyph ``<path>`` — without them city labels like Rotterdam lose their
+ *     soft halo and look sharper than the Mapbox canvas.
      *   - dy="0.35em" baseline shift (used by S/F marker glyphs to
      *     vertically centre cap-height text in a circle)
      *
@@ -181,6 +185,8 @@ class TextOutliner {
         const wrapper = doc.createElementNS(ns, 'g');
         wrapper.setAttribute('class', 'text-outline');
         if (transform) wrapper.setAttribute('transform', transform);
+        const filt = textEl.getAttribute('filter');
+        if (filt) wrapper.setAttribute('filter', filt);
 
         let anyEmitted = false;
         if (tspans.length > 0) {
@@ -264,13 +270,84 @@ class TextOutliner {
         if (!d) return false;
 
         const ns = 'http://www.w3.org/2000/svg';
-        const pathEl = wrapper.ownerDocument.createElementNS(ns, 'path');
-        pathEl.setAttribute('d', d);
-        pathEl.setAttribute('fill', paint.fill || '#000');
-        if (typeof paint.fillOpacity === 'number' && paint.fillOpacity < 1) {
-            pathEl.setAttribute('fill-opacity', String(paint.fillOpacity));
+
+        const fillRaw = paint.fill !== undefined && paint.fill !== null ? String(paint.fill).trim() : '';
+        const fillLc = fillRaw.toLowerCase();
+        let hasFill =
+            fillRaw !== '' &&
+            fillLc !== 'none' &&
+            fillLc !== 'transparent';
+
+        const strokeLc = paint.stroke !== undefined && paint.stroke !== null ? String(paint.stroke).trim().toLowerCase() : '';
+        const swNum = Number(paint.strokeWidth);
+        let hasStroke =
+            paint.stroke !== undefined &&
+            paint.stroke !== null &&
+            strokeLc !== '' &&
+            strokeLc !== 'none' &&
+            Number.isFinite(swNum) &&
+            swNum > 0;
+
+        // Plain labelling SVG often omits ``fill``; CSS defaults it to black.
+        // Sparse merged paint must still outline glyphs — but explicit ``fill="none"``
+        // without a stroke must stay invisible (no phantom ``#000`` fill).
+        let defaultBlackFill = false;
+        if (!hasFill && !hasStroke) {
+            if (paint.fill === undefined && paint.stroke === undefined) {
+                defaultBlackFill = true;
+                hasFill = true;
+            } else {
+                return false;
+            }
         }
-        wrapper.appendChild(pathEl);
+
+        const po = (paint.paintOrder || '').trim().toLowerCase();
+        const strokeFirst =
+            po === '' ||
+            po === 'stroke fill' ||
+            (!po.startsWith('fill') && po !== 'fill stroke');
+
+        const appendStrokePath = () => {
+            const pathEl = wrapper.ownerDocument.createElementNS(ns, 'path');
+            pathEl.setAttribute('d', d);
+            pathEl.setAttribute('fill', 'none');
+            pathEl.setAttribute('stroke', paint.stroke);
+            pathEl.setAttribute('stroke-width', String(swNum));
+            pathEl.setAttribute(
+                'stroke-linejoin',
+                paint.strokeLinejoin ? String(paint.strokeLinejoin) : 'round'
+            );
+            if (typeof paint.strokeOpacity === 'number' && paint.strokeOpacity < 1) {
+                pathEl.setAttribute('stroke-opacity', String(paint.strokeOpacity));
+            }
+            wrapper.appendChild(pathEl);
+        };
+
+        const appendFillPath = () => {
+            const pathEl = wrapper.ownerDocument.createElementNS(ns, 'path');
+            pathEl.setAttribute('d', d);
+            const fc = defaultBlackFill ? '#000' : (fillRaw || '#000');
+            pathEl.setAttribute('fill', fc);
+            if (typeof paint.fillOpacity === 'number' && paint.fillOpacity < 1) {
+                pathEl.setAttribute('fill-opacity', String(paint.fillOpacity));
+            }
+            wrapper.appendChild(pathEl);
+        };
+
+        if (hasStroke && hasFill) {
+            if (strokeFirst) {
+                appendStrokePath();
+                appendFillPath();
+            } else {
+                appendFillPath();
+                appendStrokePath();
+            }
+        } else if (hasStroke) {
+            appendStrokePath();
+        } else {
+            appendFillPath();
+        }
+
         return true;
     }
 
@@ -343,6 +420,36 @@ class TextOutliner {
             const f = parseFloat(fillOp);
             if (!Number.isNaN(f)) out.fillOpacity = f;
         }
+
+        const stroke = pick('stroke', 'stroke');
+        if (stroke && String(stroke).trim().toLowerCase() !== 'none') {
+            out.stroke = String(stroke).trim();
+        }
+
+        const strokeWidthRaw = pick('stroke-width', 'stroke-width');
+        if (
+            strokeWidthRaw !== undefined &&
+            strokeWidthRaw !== null &&
+            String(strokeWidthRaw).trim() !== ''
+        ) {
+            const m = String(strokeWidthRaw).match(/^([\d.]+)/);
+            if (m) {
+                const sw = parseFloat(m[1]);
+                if (Number.isFinite(sw) && sw > 0) out.strokeWidth = sw;
+            }
+        }
+
+        const strokeOp = pick('stroke-opacity', 'stroke-opacity');
+        if (strokeOp !== null && strokeOp !== undefined && strokeOp !== '') {
+            const so = parseFloat(strokeOp);
+            if (!Number.isNaN(so)) out.strokeOpacity = so;
+        }
+
+        const slj = pick('stroke-linejoin', 'stroke-linejoin');
+        if (slj) out.strokeLinejoin = String(slj).trim();
+
+        const pOrd = pick('paint-order', 'paint-order');
+        if (pOrd) out.paintOrder = String(pOrd).trim();
 
         const anchor = pick('text-anchor', 'text-anchor');
         if (anchor) out.textAnchor = anchor;

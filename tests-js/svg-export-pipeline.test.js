@@ -328,6 +328,37 @@ test('ExportUtilities: Standard-style visibility with measure-light compares', (
     assert.equal(EU.isSymbolLayoutVisible(layout, {}, 12, 'Point'), true);
 });
 
+test('ExportUtilities: parseCssColorToRgb parses hex and rgb()', () => {
+    const EU = global.ExportUtilities;
+    assert.deepEqual(EU.parseCssColorToRgb('#000'), { r: 0, g: 0, b: 0, a: 1 });
+    assert.deepEqual(EU.parseCssColorToRgb('#abc'), { r: 170, g: 187, b: 204, a: 1 });
+    assert.deepEqual(EU.parseCssColorToRgb('#334455'), { r: 51, g: 68, b: 85, a: 1 });
+    assert.deepEqual(EU.parseCssColorToRgb('rgb(10, 20, 30)'), { r: 10, g: 20, b: 30, a: 1 });
+    assert.deepEqual(EU.parseCssColorToRgb('rgba(0,0,0,0.5)'), { r: 0, g: 0, b: 0, a: 0.5 });
+});
+
+test('FeatureConverter: softPrimaryCityPlaceFill eases dark primaries (majors + bold place_label)', () => {
+    const FC = FeatureConverter;
+    const majorLayer = 'place-settlement-major-label';
+    const subProps = { class: 'settlement_subdivision' };
+
+    const majorBlack = FC.softPrimaryCityPlaceFill('#000000', 1, majorLayer, { class: 'settlement' }, '', '700');
+    assert.equal(majorBlack.textColor, 'rgb(77,77,77)');
+    assert.ok(Math.abs(majorBlack.textOpacity - 0.945) < 1e-9);
+
+    const lightEnough = FC.softPrimaryCityPlaceFill('#818181', 1, majorLayer, { class: 'settlement' }, '', '700');
+    assert.equal(lightEnough.textColor, '#818181');
+    assert.equal(lightEnough.textOpacity, 1);
+
+    assert.deepEqual(
+        FC.softPrimaryCityPlaceFill('#000000', 1, 'place-neighbourhood', subProps, 'place_label', '700'),
+        { textColor: '#000000', textOpacity: 1 }
+    );
+
+    const boldHamlet = FC.softPrimaryCityPlaceFill('#000000', 1, 'place-village', { class: 'hamlet' }, 'place_label', '700');
+    assert.equal(boldHamlet.textColor, 'rgb(44,44,44)');
+});
+
 test('FeatureConverter: evalTextLetterSpacing reads literals and expressions', () => {
     assert.equal(FeatureConverter.evalTextLetterSpacing({}, {}, 12), 0);
     assert.equal(FeatureConverter.evalTextLetterSpacing(null, {}, 12), 0);
@@ -339,6 +370,44 @@ test('FeatureConverter: evalTextLetterSpacing reads literals and expressions', (
         'text-letter-spacing': ['*', ['literal', 2], ['literal', 0.04]],
     };
     assert.ok(Math.abs(FeatureConverter.evalTextLetterSpacing(layout, {}, 12) - 0.08) < 1e-9);
+});
+
+test('FeatureConverter: major settlement halo helper boosts blur / width; blur presets extended', () => {
+    assert.equal(
+        FeatureConverter.isMajorSettlementPlaceLabel('place-settlement-major-label', {}),
+        true
+    );
+    assert.equal(
+        FeatureConverter.isMajorSettlementPlaceLabel('place-settlement-subdivision-label', {
+            class: 'settlement_subdivision',
+        }),
+        false
+    );
+    assert.equal(
+        FeatureConverter.isMajorSettlementPlaceLabel('custom-layer', { class: 'settlement' }),
+        true
+    );
+
+    const minor = FeatureConverter.computeHaloBlurAndWidthForPlaceExport(
+        'place-neighbourhood',
+        { class: 'settlement_subdivision' },
+        1.0,
+        2
+    );
+    assert.equal(minor.haloBlurForFilter, 1);
+    assert.equal(minor.textHaloWidth, 2);
+
+    const major = FeatureConverter.computeHaloBlurAndWidthForPlaceExport(
+        'place-settlement-major-label',
+        { class: 'settlement', name: 'Rotterdam' },
+        1.0,
+        2
+    );
+    assert.ok(Math.abs(major.haloBlurForFilter - 1.65) < 1e-9);
+    assert.ok(Math.abs(major.textHaloWidth - 2 * 1.08) < 1e-9);
+
+    assert.equal(FeatureConverter.pickHaloBlurFilterId(3.2), 'halo-blur-3');
+    assert.equal(FeatureConverter.pickHaloBlurFilterId(3.35), 'halo-blur-3_5');
 });
 
 test('ExportUtilities: visibility within predicate defaults open (viewport parity)', () => {
