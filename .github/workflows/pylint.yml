@@ -19,6 +19,13 @@ jobs:
       with:
         python-version: "3.13"
 
+    # svglib → rlpycairo → pycairo: wheels are not guaranteed for every
+    # CPython/OS combo Pip sees; libcairo-dev allows a Meson fallback build.
+    - name: Install Cairo build deps (pycairo)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libcairo2-dev pkg-config
+
     - name: Cache pip dependencies
       uses: actions/cache@v4
       with:
@@ -30,9 +37,8 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        # pycairo: use wheels only (no system libcairo / compiler chain in CI).
-        pip install --only-binary=pycairo -r requirements.txt
-        pip install --only-binary=pycairo -r requirements-dev.txt
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
 
     - name: Verify Python tooling
       run: |
