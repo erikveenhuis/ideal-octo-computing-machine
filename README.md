@@ -74,7 +74,7 @@ This project maintains high code quality standards:
 - **Pytest**: ~280 tests, ~94% line coverage (`pytest.ini` + CI:
   `--cov-fail-under=80`)
 - **JS tests**: 32 `node:test` cases for the SVG export pipeline
-- **CI**: GitHub Actions runs pylint + pytest + `npm test` on Python 3.14
+- **CI**: GitHub Actions runs pylint + pytest + `npm test` on Python 3.13
 - **Local quality tools**: Run `./scripts/quality_check.sh`
 
 ## Running Tests

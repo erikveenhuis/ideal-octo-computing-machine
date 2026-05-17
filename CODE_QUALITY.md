@@ -78,7 +78,7 @@ Quality checks run automatically on:
 - Pushes to `main` / `develop`
 - Pull requests targeting `main` / `develop`
 
-Python target: 3.14. The pylint command is:
+Python target: 3.13. The pylint command is:
 
 ```bash
 pylint app.py config.py exceptions.py error_handlers.py \
