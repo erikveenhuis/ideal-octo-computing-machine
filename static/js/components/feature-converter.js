@@ -92,6 +92,103 @@ class FeatureConverter {
         return Number.isFinite(n) ? n : 0;
     }
 
+    /**
+     * Resolve ``text-max-width`` (ems) from literals or Standard-style expressions.
+     * Raw layout objects from ``queryRenderedFeatures`` often carry zoom-dependent
+     * expressions; treating non-numbers as "no max width" skips wrapping and long
+     * placenames collapse onto too few lines with overlap.
+     */
+    static evalTextMaxWidth(layout, properties, zoom) {
+        if (!layout) return undefined;
+        const v = layout['text-max-width'];
+        if (v === undefined || v === null) return undefined;
+        if (typeof v === 'number') {
+            return Number.isFinite(v) && v > 0 ? v : undefined;
+        }
+        if (typeof v === 'object') {
+            try {
+                const ev = ExportUtilities.evaluateExpression(v, {
+                    ...(properties || {}),
+                    zoom,
+                });
+                const n = Number(ev);
+                return Number.isFinite(n) && n > 0 ? n : undefined;
+            } catch (_) {
+                return undefined;
+            }
+        }
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+    }
+
+    /**
+     * Line height as em multiplier (Mapbox ``text-line-height``, default 1.2).
+     */
+    static evalTextLineHeight(layout, properties, zoom) {
+        if (!layout) return 1.2;
+        const v = layout['text-line-height'];
+        if (v === undefined || v === null) return 1.2;
+        if (typeof v === 'number') {
+            return Number.isFinite(v) && v > 0 ? v : 1.2;
+        }
+        if (typeof v === 'object') {
+            try {
+                const ev = ExportUtilities.evaluateExpression(v, {
+                    ...(properties || {}),
+                    zoom,
+                });
+                const n = Number(ev);
+                return Number.isFinite(n) && n > 0 ? n : 1.2;
+            } catch (_) {
+                return 1.2;
+            }
+        }
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : 1.2;
+    }
+
+    /**
+     * CSS-like capitalize per whitespace-separated token on each line (real ``\\n``
+     * only — canvas line breaks come from shaping/wrap, not from commas in names).
+     */
+    static _capitalizePlaceLabelLines(text) {
+        if (!text || typeof text !== 'string') return text;
+        return text
+            .split('\n')
+            .map((line) =>
+                line
+                    .trim()
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .map((w) => {
+                        const c = w.charAt(0);
+                        const rest = w.slice(1);
+                        return c.toUpperCase() + rest.toLowerCase();
+                    })
+                    .join(' ')
+            )
+            .join('\n');
+    }
+
+    /**
+     * Uppercase/lowercase/capitalize. ``capitalize`` runs line-wise when the
+     * evaluated text contains real newline characters.
+     */
+    static applySymbolTextTransform(text, textTransform) {
+        let t = text === undefined || text === null ? '' : String(text).replace(/\r\n/g, '\n');
+        if (textTransform === 'uppercase') {
+            t = t.toUpperCase();
+        } else if (textTransform === 'lowercase') {
+            t = t.toLowerCase();
+        }
+
+        if (textTransform === 'capitalize') {
+            t = FeatureConverter._capitalizePlaceLabelLines(t);
+        }
+
+        return t;
+    }
+
     static featureToSVG(feature, projection, map) {
         const geometry = feature.geometry;
         const properties = feature.properties || {};
@@ -654,6 +751,22 @@ class FeatureConverter {
         return polygonElement;
     }
 
+    /**
+     * Mapbox anchors multi-line symbol text at the **block centre**. SVG ties
+     * ``<text y>`` + ``dominant-baseline`` to the **first row**, then stacks
+     * with ``dy``. Shift the authored ``y`` so the row centres fall on the
+     * projected anchor (single-line → no shift).
+     */
+    static _multiLineSymbolAnchorYOffsetPx(lineCount, fontSize, textLineHeightEm) {
+        const n = Number(lineCount);
+        if (!Number.isFinite(n) || n <= 1) return 0;
+        const fs = Number(fontSize);
+        const lhEm = Number(textLineHeightEm);
+        if (!Number.isFinite(fs) || fs <= 0 || !Number.isFinite(lhEm) || lhEm <= 0) return 0;
+        const lineHeightPx = fs * lhEm;
+        return -((n - 1) / 2) * lineHeightPx;
+    }
+
     static pointToSVG(
         coordinates,
         properties,
@@ -781,14 +894,8 @@ class FeatureConverter {
                 return null;
             }
             
-            // Apply text transformation if specified in the style
-            const textTransform = layout['text-transform'];
-            if (textTransform === 'uppercase') {
-                text = text.toUpperCase();
-            } else if (textTransform === 'lowercase') {
-                text = text.toLowerCase();
-            }
-            
+            text = FeatureConverter.applySymbolTextTransform(text, layout['text-transform']);
+
             // Evaluate font size with zoom context for proper interpolation
             let fontSize = layout['text-size'];
             if (fontSize && typeof fontSize === 'object') {
@@ -876,19 +983,25 @@ class FeatureConverter {
             // measured with the same font family/weight/style + letter
             // spacing that will end up in the SVG so the export matches
             // what Mapbox lays out.
-            const textMaxWidth = layout['text-max-width'];
+            const textMaxWidth = FeatureConverter.evalTextMaxWidth(layout, properties, zoom);
+            const textLineHeightEm = FeatureConverter.evalTextLineHeight(layout, properties, zoom);
             const textLetterSpacing = this.evalTextLetterSpacing(layout, properties, zoom);
             const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
                 measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
-            });
-            
+            }, zoom);
+            const labelAnchorYOffset = FeatureConverter._multiLineSymbolAnchorYOffsetPx(
+                wrappedText.length,
+                fontSize,
+                textLineHeightEm
+            );
+            const labelY = y + labelAnchorYOffset;
 
             
             // Build the inner content (raw text or tspans) once so we can reuse
             // it across the halo and fill text elements.
             let innerContent;
             if (wrappedText.length > 1) {
-                const lineHeight = fontSize * 1.2;
+                const lineHeight = fontSize * textLineHeightEm;
                 innerContent = wrappedText.map((line, index) =>
                     `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`
                 ).join('');
@@ -902,7 +1015,7 @@ class FeatureConverter {
             const letterSpacingPx = textLetterSpacing && fontSize ? (textLetterSpacing * fontSize) : 0;
             const baseAttrs = [
                 `x="${x.toFixed(2)}"`,
-                `y="${(y + 0.5).toFixed(2)}"`,
+                `y="${labelY.toFixed(2)}"`,
                 `text-anchor="middle"`,
                 `dominant-baseline="central"`,
                 `text-rendering="optimizeLegibility"`,
@@ -963,7 +1076,7 @@ class FeatureConverter {
             
             // ENHANCED: For text-only marker features, add a circle background
             // and rebuild the text with marker-appropriate centering. The
-            // baseAttrs above use y+0.5 plus dominant-baseline=central, which
+            // baseAttrs above use dominant-baseline=central, which
             // is fine for free-floating place labels but leaves the symbol
             // visibly low inside a marker circle.
             if (isMarkerFeature && properties['marker-symbol'] && properties['marker-color']) {
@@ -975,7 +1088,7 @@ class FeatureConverter {
 
                 const markerTextAttrs = [
                     `x="${x.toFixed(2)}"`,
-                    `y="${y.toFixed(2)}"`,
+                    `y="${labelY.toFixed(2)}"`,
                     `dy="0.35em"`,
                     `text-anchor="middle"`,
                     `text-rendering="optimizeLegibility"`,
@@ -1040,9 +1153,8 @@ class FeatureConverter {
                 
                 // Center uppercase glyph in the circle: y at circle center,
                 // dy=0.35em pushes the alphabetic baseline down so the cap
-                // height straddles the center. Replaces the previous
-                // "y + 0.5 + dominant-baseline=central" combo that left
-                // the text slightly below center.
+                // height straddles the circle centre (avoids dominant-baseline
+                // tricks that sat visibly low inside the marker ring).
                 return `<g class="marker">
     <circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${radius}" fill="${color}" fill-opacity="${opacity}"/>
     <text x="${x.toFixed(2)}" y="${y.toFixed(2)}" dy="0.35em"
@@ -1431,14 +1543,8 @@ class FeatureConverter {
             return null;
         }
         
-        // Apply text transformation if specified
-        const textTransform = layout['text-transform'];
-        if (textTransform === 'uppercase') {
-            text = text.toUpperCase();
-        } else if (textTransform === 'lowercase') {
-            text = text.toLowerCase();
-        }
-        
+        text = FeatureConverter.applySymbolTextTransform(text, layout['text-transform']);
+
         // Get styling properties with better defaults and evaluate font size expressions
         let fontSize = layout['text-size'] || 14;
         if (fontSize && typeof fontSize === 'object') {
@@ -1512,16 +1618,23 @@ class FeatureConverter {
         ));
 
         // Check for text wrapping based on text-max-width
-        const textMaxWidth = layout['text-max-width'];
+        const textMaxWidth = FeatureConverter.evalTextMaxWidth(layout, properties, zoom);
+        const textLineHeightEm = FeatureConverter.evalTextLineHeight(layout, properties, zoom);
         const textLetterSpacing = this.evalTextLetterSpacing(layout, properties, zoom);
         const wrappedText = this.wrapText(text, textMaxWidth, fontSize, layout, properties, layerId, {
             measureFontFamily, fontWeight, fontStyle, letterSpacing: textLetterSpacing
-        });
+        }, zoom);
+        const labelAnchorYOffset = FeatureConverter._multiLineSymbolAnchorYOffsetPx(
+            wrappedText.length,
+            fontSize,
+            textLineHeightEm
+        );
+        const labelY = y + labelAnchorYOffset;
         
         // Build inner text content once so it can be reused by halo + fill passes
         let innerContent;
         if (wrappedText.length > 1) {
-            const lineHeight = fontSize * 1.2;
+            const lineHeight = fontSize * textLineHeightEm;
             innerContent = wrappedText.map((line, index) =>
                 `<tspan x="${x.toFixed(2)}" dy="${index === 0 ? 0 : lineHeight}">${line}</tspan>`
             ).join('');
@@ -1534,7 +1647,7 @@ class FeatureConverter {
             : '';
 
         const letterSpacingPx = textLetterSpacing && fontSize ? (textLetterSpacing * fontSize) : 0;
-        const baseAttrs = `x="${x.toFixed(2)}" y="${y.toFixed(2)}"`
+        const baseAttrs = `x="${x.toFixed(2)}" y="${labelY.toFixed(2)}"`
             + ` text-anchor="middle" dominant-baseline="middle"`
             + ` text-rendering="geometricPrecision" shape-rendering="geometricPrecision"`
             + ` style="font-smooth: always; -webkit-font-smoothing: antialiased;"`
@@ -1626,7 +1739,8 @@ class FeatureConverter {
     // Note: text-line-height is NOT a wrap signal (Mapbox defaults it to 1.2
     // for every label). It only controls vertical spacing once wrapping has
     // already been decided.
-    static shouldWrapText(layout, properties, layerId, actualText = null) {
+    static shouldWrapText(layout, properties, layerId, actualText = null, zoom = 12) {
+        if (!layout) return false;
         // Explicit opt-out
         if (layout['text-wrap'] === false || layout['text-wrap'] === 'none') {
             return false;
@@ -1638,7 +1752,7 @@ class FeatureConverter {
         // Embedded newlines are an explicit wrap from the data
         if (text.includes('\n')) return true;
 
-        const textMaxWidth = layout['text-max-width'];
+        const textMaxWidth = FeatureConverter.evalTextMaxWidth(layout, properties, zoom);
         const hasMaxWidth = typeof textMaxWidth === 'number' && textMaxWidth > 0;
         const hasNaturalBreaks = text.includes(' ') || text.includes('-');
 
@@ -1660,23 +1774,60 @@ class FeatureConverter {
      * FontManager.ensureFontInDocument before this is called for the widths
      * to reflect the real font.
      */
-    static wrapText(text, maxWidth, fontSize, layout, properties, layerId, fontSpec = null) {
-        if (!this.shouldWrapText(layout, properties, layerId, text)) {
-            return [text];
-        }
-        if (!maxWidth || typeof maxWidth !== 'number') {
-            return [text];
+    static wrapText(
+        text,
+        maxWidth,
+        fontSize,
+        layout,
+        properties,
+        layerId,
+        fontSpec = null,
+        zoom = 12
+    ) {
+        let t =
+            typeof text === 'string'
+                ? text.trim()
+                : text === undefined || text === null
+                  ? ''
+                  : String(text).trim();
+        if (!t) {
+            return [''];
         }
 
-        // Honor explicit \n line breaks first - keep each segment as a line
-        // and recurse so each segment is individually width-checked.
-        if (text.includes('\n')) {
-            const lines = [];
-            for (const segment of text.split('\n')) {
-                const wrapped = this.wrapText(segment, maxWidth, fontSize, layout, properties, layerId, fontSpec);
-                lines.push(...wrapped);
+        t = t.replace(/\r\n/g, '\n').trim();
+
+        // Hard line breaks first — each segment becomes at least one SVG line,
+        // even when ``text-max-width`` is unset (otherwise ``\\n`` is ignored).
+        if (t.includes('\n')) {
+            const segments = t.split(/\n/).map((s) => s.trim()).filter(Boolean);
+            const out = [];
+            for (const seg of segments) {
+                out.push(
+                    ...FeatureConverter.wrapText(
+                        seg,
+                        maxWidth,
+                        fontSize,
+                        layout,
+                        properties,
+                        layerId,
+                        fontSpec,
+                        zoom
+                    )
+                );
             }
-            return lines;
+            return out.length ? out : [t];
+        }
+
+        if (!FeatureConverter.shouldWrapText(layout, properties, layerId, t, zoom)) {
+            return [t];
+        }
+
+        const resolvedMax =
+            typeof maxWidth === 'number' && Number.isFinite(maxWidth) && maxWidth > 0
+                ? maxWidth
+                : FeatureConverter.evalTextMaxWidth(layout, properties, zoom);
+        if (!resolvedMax || typeof resolvedMax !== 'number') {
+            return [t];
         }
 
         const fontManager = this.initializeFontManager();
@@ -1686,13 +1837,78 @@ class FeatureConverter {
         const letterSpacing = (fontSpec && fontSpec.letterSpacing) || 0;
         const measure = (s) => fontManager.measureTextWidth(s, measureFamily, fontSize, measureWeight, measureStyle, letterSpacing);
 
-        const maxWidthPx = maxWidth * fontSize; // Mapbox text-max-width is in ems
-        const totalWidth = measure(text);
+        const maxWidthPx = resolvedMax * fontSize; // Mapbox text-max-width is in ems
+        const totalWidth = measure(t);
         if (totalWidth <= maxWidthPx) {
-            return [text];
+            return [t];
         }
 
-        return this._balancedWrap(text, maxWidthPx, measure);
+        return this._balancedWrap(t, maxWidthPx, measure);
+    }
+
+    /**
+     * Greedy wrap by chunks — every emitted line fits ``maxWidthPx`` unless a
+     * single chunk alone exceeds it (Mapbox would clip/shape differently).
+     */
+    static _greedyChunkWrap(chunks, maxWidthPx, measure) {
+        const lines = [];
+        let start = 0;
+        while (start < chunks.length) {
+            let end = start + 1;
+            while (end <= chunks.length) {
+                const candidate = FeatureConverter._joinChunks(chunks, start, end);
+                if (measure(candidate) <= maxWidthPx) {
+                    end++;
+                } else {
+                    break;
+                }
+            }
+            end--;
+            if (end <= start) {
+                end = start + 1;
+            }
+            lines.push(FeatureConverter._joinChunks(chunks, start, end));
+            start = end;
+        }
+        return lines.length ? lines : [FeatureConverter._joinChunks(chunks, 0, chunks.length)];
+    }
+
+    /**
+     * Mapbox stacks hyphenated Dutch names like ``HENDRIK-IDO-`` / ``AMBACHT``.
+     * Variance-minimizing breaks often choose ``HENDRIK-`` / ``IDO-AMBACHT`` instead.
+     * When the all-but-last join ends with ``-`` and the tail fits alone, prefer that split.
+     */
+    static _preferHyphenStackFinalChunkAlone(lines, chunks, maxWidthPx, measure) {
+        if (!lines || lines.length !== 2 || !chunks || chunks.length < 2) {
+            return lines;
+        }
+        const lastTxt = chunks[chunks.length - 1].text;
+        if (lastTxt.endsWith('-')) {
+            return lines;
+        }
+        const prefix = FeatureConverter._joinChunks(chunks, 0, chunks.length - 1);
+        if (!prefix.endsWith('-')) {
+            return lines;
+        }
+        if (measure(lastTxt) > maxWidthPx + 1.5) {
+            return lines;
+        }
+        if (measure(prefix) > maxWidthPx + 1.5) {
+            return lines;
+        }
+        return [prefix, lastTxt];
+    }
+
+    /** Binomial coefficient C(n,k); used to bound balanced-wrap enumeration cost. */
+    static _binom(n, k) {
+        if (k < 0 || k > n) return 0;
+        if (k === 0 || k === n) return 1;
+        k = Math.min(k, n - k);
+        let c = 1;
+        for (let i = 1; i <= k; i++) {
+            c = Math.round((c * (n - k + i)) / i);
+        }
+        return c;
     }
 
     /**
@@ -1729,7 +1945,10 @@ class FeatureConverter {
         if (chunks.length === 1) return [text];
 
         const totalWidth = measure(text);
-        let lineCount = Math.max(1, Math.ceil(totalWidth / maxWidthPx));
+        // Slightly underestimate effective max line width vs Mapbox GL shaping so we
+        // do not merge stacked place rows (e.g. three-line suburbs) into two SVG lines.
+        const LINE_COUNT_WIDTH_BIAS = 0.88;
+        let lineCount = Math.max(1, Math.ceil(totalWidth / (maxWidthPx * LINE_COUNT_WIDTH_BIAS)));
         // Cap at chunk count - we can't split into more lines than chunks.
         lineCount = Math.min(lineCount, chunks.length);
 
@@ -1757,16 +1976,18 @@ class FeatureConverter {
             return { lines, cost };
         };
 
-        // Enumerate combinations of (lineCount-1) break points among
-        // (chunks.length-1) candidate slots. Real labels are tiny (typically
-        // 2-5 chunks), so this is cheap. Cap at 6 chunks to keep it bounded
-        // for pathological cases.
         const breakSlots = chunks.length - 1;
         const breakNeeded = lineCount - 1;
         if (breakNeeded <= 0) return [text];
 
-        const limitedSlots = Math.min(breakSlots, 6);
-        const combinations = this._kSubsets(limitedSlots, breakNeeded);
+        const MAX_COMBINATIONS = 12000;
+        const comboEstimate =
+            breakNeeded <= breakSlots ? FeatureConverter._binom(breakSlots, breakNeeded) : 0;
+
+        let combinations = [];
+        if (comboEstimate > 0 && comboEstimate <= MAX_COMBINATIONS) {
+            combinations = FeatureConverter._kSubsets(breakSlots, breakNeeded);
+        }
 
         let best = null;
         for (const combo of combinations) {
@@ -1774,7 +1995,16 @@ class FeatureConverter {
             if (best === null || result.cost < best.cost) best = result;
         }
 
-        return best ? best.lines : [text];
+        const greedyLines = FeatureConverter._greedyChunkWrap(chunks, maxWidthPx, measure);
+
+        let lines;
+        if (best && best.lines.every((ln) => measure(ln) <= maxWidthPx + 1)) {
+            lines = best.lines;
+        } else {
+            lines = greedyLines;
+        }
+        lines = FeatureConverter._preferHyphenStackFinalChunkAlone(lines, chunks, maxWidthPx, measure);
+        return lines;
     }
 
     static _joinChunks(chunks, fromIdx, toIdx) {

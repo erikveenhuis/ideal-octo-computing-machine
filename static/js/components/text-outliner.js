@@ -29,6 +29,14 @@
  *     accepts ``{ letterSpacing: em }`` matching HarfBuzz tracking — we
  *     convert px → em so outlined glyphs match the canvas tracked labels.
  *
+ * Dominant baseline (place labels):
+ *   - FeatureConverter emits ``dominant-baseline="central"`` (points) or
+ *     ``middle`` (line labels). Browsers interpret ``y`` relative to that
+ *     line; ``getPath`` draws on the alphabetic baseline. We shift using the
+ *     probe path's vertical bbox centre (fallback: hhea ascender/descender)
+ *     so outlined glyph geometry tracks each string's ink — closer to canvas
+ *     than a single font-wide metric.
+ *
  * Outlining the wrong variant produces subtly thinner glyphs on the
  * print plate, which is exactly the regression the user reported when
  * the @font-face block omitted the bold variant — the cutter / RIP
@@ -190,15 +198,50 @@ class TextOutliner {
 
         let anyEmitted = false;
         if (tspans.length > 0) {
-            // Per SVG, a <tspan> without its own x/y inherits placement
-            // from the parent <text>. FeatureConverter emits multi-line
-            // wrapped labels as <tspan x="..." dy="...">…</tspan> with
-            // no `y` (the `y` lives on the parent <text>); without this
-            // inheritance every wrapped label would render at y=0.
+            // Per SVG, each child <tspan>'s dy shifts relative to the *previous*
+            // text position — dy values are cumulative across siblings. Using
+            // parent <text> y + dy for every tspan pins lines 2 and 3 to the same
+            // baseline (FeatureConverter repeats dy="lineHeight" per row).
             const parentX = this._readNumericAttr(textEl, 'x', 0);
             const parentY = this._readNumericAttr(textEl, 'y', 0);
+            // Basemap labels (FeatureConverter) stack rows with repeated dy="lineHeight"
+            // and no per-tspan y — SVG advances the baseline by dy each row. Overlay
+            // text (gpx-app.createTextElement) sets an explicit y on every tspan; using
+            // only cumulative dy from parent y would pin every row to the same baseline.
+            let cumulativeBaselineY = parentY;
             for (const tspan of tspans) {
-                if (this._appendOutlinedRun(wrapper, tspan, textDefaults, textAnchor, fonts, parentX, parentY)) {
+                const fs =
+                    this._readPaintAttrs(tspan).fontSize ||
+                    textDefaults.fontSize ||
+                    12;
+                const dy = this._readEmAttr(tspan, 'dy', 0, fs);
+                // Prefer unprefixed ``y`` (DOM view); some parsers expose only the
+                // namespaced attribute bit — check both so overlay tspans are not
+                // mistaken for implicit-y basemap rows after DOMParser round-trips.
+                const hasExplicitY =
+                    (typeof tspan.hasAttribute === 'function' && tspan.hasAttribute('y')) ||
+                    (typeof tspan.hasAttributeNS === 'function' &&
+                        tspan.hasAttributeNS(ns, 'y'));
+                let outlineOpts = {};
+                if (hasExplicitY) {
+                    const yAbs = this._readNumericAttr(tspan, 'y', parentY);
+                    cumulativeBaselineY = yAbs + dy;
+                } else {
+                    cumulativeBaselineY += dy;
+                    outlineOpts = { cumulativeBaselineY };
+                }
+                if (
+                    this._appendOutlinedRun(
+                        wrapper,
+                        tspan,
+                        textDefaults,
+                        textAnchor,
+                        fonts,
+                        parentX,
+                        parentY,
+                        outlineOpts
+                    )
+                ) {
                     anyEmitted = true;
                 }
             }
@@ -220,7 +263,16 @@ class TextOutliner {
      * when runEl is the <text> itself (its attributes are then the
      * authoritative source).
      */
-    static _appendOutlinedRun(wrapper, runEl, parentDefaults, parentAnchor, fonts, parentX = 0, parentY = 0) {
+    static _appendOutlinedRun(
+        wrapper,
+        runEl,
+        parentDefaults,
+        parentAnchor,
+        fonts,
+        parentX = 0,
+        parentY = 0,
+        opts = {}
+    ) {
         const text = (runEl.textContent || '').trim();
         if (!text) return false;
 
@@ -242,16 +294,24 @@ class TextOutliner {
 
         const font = TextOutliner._pickFontVariant(paint.fontWeight, fonts);
 
+        const cumBaseline =
+            opts && opts.cumulativeBaselineY !== undefined && opts.cumulativeBaselineY !== null
+                ? opts.cumulativeBaselineY
+                : null;
+
         // Resolve placement. Tspans/<text> use x and y in user units;
         // dx/dy are additive shifts. dy commonly carries the "0.35em"
         // baseline trick used by marker glyphs to centre cap-height
         // text in a surrounding circle. Missing tspan attrs inherit
         // from the parent <text> (parentX / parentY) like a real SVG
         // renderer would.
+        //
+        // For sibling <tspan> stacks, SVG applies each dy relative to the
+        // previous line — ``cumulativeBaselineY`` folds that so outlines match.
         const x = this._readNumericAttr(runEl, 'x', parentX);
         const y = this._readNumericAttr(runEl, 'y', parentY);
         const dx = this._readEmAttr(runEl, 'dx', 0, fontSize);
-        const dy = this._readEmAttr(runEl, 'dy', 0, fontSize);
+        const dy = cumBaseline !== null ? 0 : this._readEmAttr(runEl, 'dy', 0, fontSize);
 
         // Anchor handling: opentype.js places the run with its first
         // glyph's left side at (renderX, renderY). text-anchor describes
@@ -263,7 +323,15 @@ class TextOutliner {
         else if (anchor === 'end') anchorShift = -advance;
 
         const renderX = x + dx + anchorShift;
-        const renderY = y + dy;
+        let renderY = cumBaseline !== null ? cumBaseline : y + dy;
+        const baselineShift = TextOutliner._resolveDominantBaselineAlphabeticShift(
+            font,
+            fontSize,
+            text,
+            letterSpacingEm,
+            paint.dominantBaseline
+        );
+        renderY += baselineShift;
         const pathOpts = letterSpacingEm > 1e-9 ? { letterSpacing: letterSpacingEm } : {};
         const otPath = font.getPath(text, renderX, renderY, fontSize, pathOpts);
         const d = otPath.toPathData(3);
@@ -454,7 +522,61 @@ class TextOutliner {
         const anchor = pick('text-anchor', 'text-anchor');
         if (anchor) out.textAnchor = anchor;
 
+        const domBaseline = pick('dominant-baseline', 'dominant-baseline');
+        if (domBaseline) {
+            out.dominantBaseline = String(domBaseline).trim().toLowerCase();
+        }
+
         return out;
+    }
+
+    /**
+     * SVG ``dominant-baseline`` ``central`` / ``middle`` put the anchor ``y`` on
+     * the alignment line; opentype.js draws on the alphabetic baseline.
+     *
+     * Prefer the **vertical centre of the shaped glyph ink** (probe path at the
+     * origin) so mixed-case / descenders track canvas placement better than a
+     * single hhea midpoint. Falls back to ``(ascender+descender)/2`` when the
+     * bbox is degenerate.
+     */
+    static _resolveDominantBaselineAlphabeticShift(
+        font,
+        fontSize,
+        text,
+        letterSpacingEm,
+        dominantBaseline
+    ) {
+        if (!dominantBaseline || !font || !(fontSize > 0)) return 0;
+        const db = String(dominantBaseline).trim().toLowerCase();
+        if (db !== 'central' && db !== 'middle') return 0;
+
+        const pathOpts = letterSpacingEm > 1e-9 ? { letterSpacing: letterSpacingEm } : {};
+        try {
+            const probePath = font.getPath(text, 0, 0, fontSize, pathOpts);
+            if (probePath && typeof probePath.getBoundingBox === 'function') {
+                const bb = probePath.getBoundingBox();
+                const h = bb.y2 - bb.y1;
+                if (
+                    Number.isFinite(h) &&
+                    h > 1e-6 &&
+                    Number.isFinite(bb.y1) &&
+                    Number.isFinite(bb.y2)
+                ) {
+                    const midY = (bb.y1 + bb.y2) / 2;
+                    return -midY;
+                }
+            }
+        } catch (_e) {
+            /* fall through to metric fallback */
+        }
+
+        const upm = font.unitsPerEm;
+        const asc = Number(font.ascender);
+        const desc = Number(font.descender);
+        if (!Number.isFinite(upm) || upm <= 0 || !Number.isFinite(asc) || !Number.isFinite(desc)) {
+            return 0;
+        }
+        return ((asc + desc) / 2 / upm) * fontSize;
     }
 
     /** SVG/CSS ``letter-spacing`` → px (FeatureConverter emits px-sized values). */

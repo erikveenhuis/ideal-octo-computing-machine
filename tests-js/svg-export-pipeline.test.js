@@ -337,6 +337,115 @@ test('ExportUtilities: parseCssColorToRgb parses hex and rgb()', () => {
     assert.deepEqual(EU.parseCssColorToRgb('rgba(0,0,0,0.5)'), { r: 0, g: 0, b: 0, a: 0.5 });
 });
 
+test('FeatureConverter: evalTextMaxWidth / evalTextLineHeight read literals + expressions', () => {
+    const FC = FeatureConverter;
+    assert.equal(FC.evalTextMaxWidth(null, {}, 12), undefined);
+    assert.equal(FC.evalTextMaxWidth({ 'text-max-width': ['literal', 7] }, {}, 11), 7);
+    assert.equal(FC.evalTextLineHeight({}, {}, 12), 1.2);
+    assert.equal(FC.evalTextLineHeight({ 'text-line-height': ['literal', 1.35] }, {}, 11), 1.35);
+});
+
+test('FeatureConverter: capitalize applies per line only when real newlines exist', () => {
+    const FC = FeatureConverter;
+    assert.equal(
+        FC.applySymbolTextTransform('hendrik-ido-\nido-ambacht', 'capitalize'),
+        'Hendrik-ido-\nIdo-ambacht'
+    );
+});
+
+test('FeatureConverter: wrapText splits newline stacks without text-max-width', () => {
+    const layout = { 'text-letter-spacing': 0 };
+    const lines = FeatureConverter.wrapText(
+        'Nieuwerkerk\naan den\nijssel',
+        undefined,
+        14,
+        layout,
+        {},
+        'place-test',
+        {
+            measureFontFamily: 'Arial',
+            fontWeight: '400',
+            fontStyle: 'normal',
+            letterSpacing: 0,
+        },
+        12
+    );
+    assert.deepEqual(lines, ['Nieuwerkerk', 'aan den', 'ijssel']);
+});
+
+test('FeatureConverter: wrapText honours evaluated max-width for multi-line placenames', () => {
+    FeatureConverter.resetFontTracking();
+    const fm = FeatureConverter.initializeFontManager();
+    fm._measureCanvas = null;
+    fm._measureCtx = null;
+
+    const origCreate = document.createElement.bind(document);
+    document.createElement = function (tagName, options) {
+        if (String(tagName).toLowerCase() === 'canvas') {
+            return {
+                getContext() {
+                    return {
+                        font: '',
+                        measureText(str) {
+                            return { width: String(str).length * 9 };
+                        },
+                    };
+                },
+            };
+        }
+        return origCreate(tagName, options);
+    };
+    try {
+        const layout = {
+            'text-max-width': ['literal', 5],
+            'text-letter-spacing': 0,
+        };
+        const fontSpec = {
+            measureFontFamily: 'Arial',
+            fontWeight: '400',
+            fontStyle: 'normal',
+            letterSpacing: 0,
+        };
+        const lines = FeatureConverter.wrapText(
+            'Alpha Beta Gamma Delta Echo Foxtrot',
+            undefined,
+            14,
+            layout,
+            {},
+            'place-test',
+            fontSpec,
+            12
+        );
+        assert.ok(
+            lines.length >= 4,
+            `expected wrapped lines >= 4, got ${lines.length}: ${JSON.stringify(lines)}`
+        );
+    } finally {
+        document.createElement = origCreate;
+        fm._measureCanvas = null;
+        fm._measureCtx = null;
+    }
+});
+
+test('FeatureConverter: multi-line symbol anchor offsets first row so block centres on point', () => {
+    assert.equal(FeatureConverter._multiLineSymbolAnchorYOffsetPx(1, 14, 1.2), 0);
+    assert.ok(
+        Math.abs(FeatureConverter._multiLineSymbolAnchorYOffsetPx(2, 14, 1.2) + 8.4) < 1e-9,
+        'two lines: shift first row up by half one line-height'
+    );
+    assert.ok(
+        Math.abs(FeatureConverter._multiLineSymbolAnchorYOffsetPx(3, 10, 1.2) + 12) < 1e-9,
+        'three lines: shift up by one full line-height'
+    );
+});
+
+test('FeatureConverter: hyphenated place prefers trailing chunk alone on line two (Mapbox parity)', () => {
+    const measure = (s) => String(s).length * 9;
+    const maxWidthPx = 120;
+    const lines = FeatureConverter._balancedWrap('HENDRIK-IDO-AMBACHT', maxWidthPx, measure);
+    assert.deepEqual(lines, ['HENDRIK-IDO-', 'AMBACHT']);
+});
+
 test('FeatureConverter: softPrimaryCityPlaceFill eases dark primaries (majors + bold place_label)', () => {
     const FC = FeatureConverter;
     const majorLayer = 'place-settlement-major-label';

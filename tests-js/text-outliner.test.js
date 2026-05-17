@@ -199,6 +199,68 @@ test('outlines all <text>/<tspan> nodes for the production overlay shape', async
     }
     assert.equal(totalPaths, 9,
         `expected 9 glyph paths (one per text run), got ${totalPaths}`);
+
+    const firstMoveY = (pathEl) => {
+        const d = pathEl.getAttribute('d');
+        const m = d && d.match(/^M\s*-?[\d.]+\s+(-?[\d.]+)/);
+        return m ? parseFloat(m[1]) : NaN;
+    };
+    const ysForWrapper = (w) =>
+        [...w.querySelectorAll('path')]
+            .map(firstMoveY)
+            .filter((v) => Number.isFinite(v))
+            .sort((a, b) => a - b);
+
+    const titleYs = ysForWrapper(wrappers[0]);
+    assert.ok(
+        titleYs.length >= 2 && titleYs[titleYs.length - 1] - titleYs[0] > 25,
+        `title block must stack two lines vertically (got ys=${JSON.stringify(titleYs)})`
+    );
+
+    const statLabelYs = ysForWrapper(wrappers[2]);
+    assert.ok(
+        statLabelYs.length >= 3 &&
+            statLabelYs[statLabelYs.length - 1] - statLabelYs[0] > 45,
+        `stat labels must use three distinct baselines (got ys=${JSON.stringify(statLabelYs)})`
+    );
+});
+
+test('overlay multi-line text stacks after SVG serialize + DOMParser round-trip', async () => {
+    const statLabels = makeOverlayText({
+        x: 127,
+        y: 704.9,
+        lines: [
+            { text: 'Afstand', y: 0, style: "font-family:'DIN Pro';font-size:20px;font-weight:bold;" },
+            { text: 'Tijd', y: 30, style: "font-family:'DIN Pro';font-size:20px;font-weight:bold;" },
+            { text: 'Tempo', y: 60, style: "font-family:'DIN Pro';font-size:20px;font-weight:bold;" },
+        ],
+    });
+    const svg = wrapSvg(statLabels);
+    const roundTrip = new DOMParser().parseFromString(
+        new XMLSerializer().serializeToString(svg),
+        'image/svg+xml'
+    );
+    const errEl = roundTrip.querySelector('parsererror');
+    assert.ok(!errEl, roundTrip.documentElement?.textContent || 'parse failed');
+
+    await TextOutliner.outlineSvgTextNodes(roundTrip.documentElement);
+
+    function firstMoveY(pathEl) {
+        const d = pathEl.getAttribute('d');
+        const m = d && d.match(/^M\s*-?[\d.]+\s+(-?[\d.]+)/);
+        return m ? parseFloat(m[1]) : NaN;
+    }
+
+    const paths = [...roundTrip.querySelectorAll('g.text-outline path')];
+    assert.equal(paths.length, 3);
+    const ys = paths
+        .map(firstMoveY)
+        .filter((v) => Number.isFinite(v))
+        .sort((a, b) => a - b);
+    assert.ok(
+        ys[2] - ys[0] > 45,
+        `expected ~60px span between first and last stat baseline; got ys=${JSON.stringify(ys)}`
+    );
 });
 
 
@@ -291,6 +353,38 @@ test('text-anchor middle shifts the glyph run leftward by half its width', async
     assert.ok(xStart > -5, `start-anchored run x=${xStart} should be near 0`);
     assert.ok(xMiddle < -5,
         `middle-anchored run x=${xMiddle} should be substantially negative`);
+});
+
+test('dominant-baseline central lowers alphabetic outline toward browser SVG layout', async () => {
+    function mkLetter(dbAttr) {
+        const t = document.createElementNS(SVG_NS, 'text');
+        t.setAttribute('x', '400');
+        t.setAttribute('y', '300');
+        t.setAttribute('text-anchor', 'middle');
+        if (dbAttr) t.setAttribute('dominant-baseline', dbAttr);
+        t.setAttribute('font-family', 'DIN Pro Bold');
+        t.setAttribute('font-size', '20');
+        t.setAttribute('font-weight', '700');
+        t.textContent = 'H';
+        return t;
+    }
+    const svgDefault = wrapSvg(mkLetter(null));
+    const svgCentral = wrapSvg(mkLetter('central'));
+    await TextOutliner.outlineSvgTextNodes(svgDefault);
+    await TextOutliner.outlineSvgTextNodes(svgCentral);
+
+    const firstMoveY = (svg) => {
+        const d = svg.querySelector('path').getAttribute('d');
+        const m = d.match(/^M\s*-?[\d.]+\s+(-?[\d.]+)/);
+        return m ? parseFloat(m[1]) : NaN;
+    };
+    const yDefault = firstMoveY(svgDefault);
+    const yCentral = firstMoveY(svgCentral);
+    const delta = yCentral - yDefault;
+    assert.ok(
+        delta > 6 && delta < 11,
+        `expected ~8px downward shift at 20px DIN Pro Bold (default y=${yDefault}, central y=${yCentral})`
+    );
 });
 
 
@@ -442,6 +536,47 @@ test('multi-tspan <text> without per-tspan y inherits y from the parent <text>',
         Math.abs(y2 - 514) < 12,
         `tspan #2 baseline should sit near y=514 (500 inherited + dy=14); got y≈${y2}`
     );
+});
+
+test('three sibling tspans with repeated dy use cumulative SVG baselines', async () => {
+    // Wrapped labels repeat dy="lineHeight" on every row after the first; SVG
+    // stacks those shifts relative to the previous line. Outlining must not
+    // reuse parent y + dy per row (that pins row 2 and 3 to the same baseline).
+    const text = document.createElementNS(SVG_NS, 'text');
+    text.setAttribute('x', '100');
+    text.setAttribute('y', '500');
+    text.setAttribute('font-family', 'DIN Pro Bold');
+    text.setAttribute('font-size', '12');
+    text.setAttribute('font-weight', '700');
+
+    const rows = [
+        { dy: '0', label: 'AAA' },
+        { dy: '14', label: 'BBB' },
+        { dy: '14', label: 'CCC' },
+    ];
+    for (const row of rows) {
+        const ts = document.createElementNS(SVG_NS, 'tspan');
+        ts.setAttribute('x', '100');
+        ts.setAttribute('dy', row.dy);
+        ts.textContent = row.label;
+        text.appendChild(ts);
+    }
+
+    const svg = wrapSvg(text);
+    await TextOutliner.outlineSvgTextNodes(svg);
+
+    const paths = Array.from(svg.querySelectorAll('g.text-outline > path'));
+    assert.equal(paths.length, 3, 'one outlined <path> per tspan');
+
+    const firstY = (p) => {
+        const d = p.getAttribute('d');
+        const m = d && d.match(/^M\s*-?[\d.]+\s+(-?[\d.]+)/);
+        return m ? parseFloat(m[1]) : NaN;
+    };
+    const ys = paths.map(firstY);
+    assert.ok(Math.abs(ys[0] - 500) < 12, `row 1 baseline ≈500; got y≈${ys[0]}`);
+    assert.ok(Math.abs(ys[1] - 514) < 12, `row 2 baseline ≈514; got y≈${ys[1]}`);
+    assert.ok(Math.abs(ys[2] - 528) < 12, `row 3 baseline ≈528; got y≈${ys[2]}`);
 });
 
 test('SVG letter-spacing is honoured when outlining basemap-style labels', async () => {
