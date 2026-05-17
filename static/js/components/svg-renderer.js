@@ -267,68 +267,77 @@ class SVGRenderer {
         // Add optional overlay after map features so it renders on top.
         //
         // The overlay's Thrucut cut paths are emitted as SEPARATE top-level
-        // <g> siblings of the overlay group, each carrying the overlay
-        // transform directly. This is what makes Adobe Illustrator import
-        // Thrucut as its own named layer in the Layers panel - Illustrator
-        // only treats direct children of <svg> as layers, so any extra
+        // <g> siblings of the overlay group. Each uses the same translate +
+        // nested <svg width/height/viewBox> placement (object-fit: contain)
+        // so cut paths line up with the artwork. This is what makes Adobe
+        // Illustrator import Thrucut as its own named layer in the Layers
+        // panel — Illustrator only treats direct children of <svg> as layers, so any extra
         // wrapping <g> would push the cut group back into nested-group
         // territory and Illustrator would import it as a Group inside a
         // layer instead of its own layer.
         const hasCutLayers = overlayData && Array.isArray(overlayData.cutLayers) && overlayData.cutLayers.length > 0;
         if (overlayData && (overlayData.innerContent || hasCutLayers)) {
             const viewBox = overlayData.viewBox || { minX: 0, minY: 0, width: width, height: height };
-            // Match [templates/components/gpx_styles.html]: overlay preview uses
-            // width/height 100% + object-fit: contain (uniform scale, centered).
-            // Independent scaleX/scaleY used to stretch the medal to the full SVG
-            // viewport, shifting the Thrucut window vs the map vs on-screen PDF preview.
+            // Match [templates/components/gpx_styles.html]: object-fit: contain, centered.
+            // Use a nested <svg width height viewBox> instead of translate()+scale() on a <g>.
+            // Browser <img> uses the same box mapping; matrix order on <g> can skew edges
+            // (left vs right / top vs bottom) in some viewers compared to the WebGL canvas.
             const vbW = viewBox.width;
             const vbH = viewBox.height;
-            let overlayTransform;
+            let overlayTranslate = '';
+            let overlayInnerSvgOpen = '';
+            let overlayInnerSvgClose = '</svg>\n';
             if (vbW > 0 && vbH > 0) {
-                const s = Math.min(width / vbW, height / vbH);
-                const offsetX = (width - s * vbW) / 2;
-                const offsetY = (height - s * vbH) / 2;
-                const tx = offsetX - s * viewBox.minX;
-                const ty = offsetY - s * viewBox.minY;
-                overlayTransform = `translate(${tx}, ${ty}) scale(${s})`;
+                const scaleContain =
+                    width > 0 && height > 0
+                        ? Math.min(width / vbW, height / vbH)
+                        : 1;
+                const dispW = vbW * scaleContain;
+                const dispH = vbH * scaleContain;
+                const offsetX = (width - dispW) / 2;
+                const offsetY = (height - dispH) / 2;
+                const vbStr = `${viewBox.minX} ${viewBox.minY} ${vbW} ${vbH}`;
+                overlayTranslate = `translate(${offsetX}, ${offsetY})`;
+                overlayInnerSvgOpen =
+                    `<svg xmlns="http://www.w3.org/2000/svg" width="${dispW}" height="${dispH}" `
+                    + `viewBox="${vbStr}" overflow="visible" shape-rendering="geometricPrecision">\n`;
             } else {
-                overlayTransform = `translate(${-viewBox.minX}, ${-viewBox.minY}) scale(1)`;
+                overlayTranslate = `translate(${-viewBox.minX}, ${-viewBox.minY})`;
+                overlayInnerSvgOpen = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" `
+                    + `viewBox="${viewBox.minX} ${viewBox.minY} ${Math.max(vbW, 1)} ${Math.max(vbH, 1)}" overflow="visible">\n`;
             }
 
             if (overlayData.innerContent) {
                 svgBody += `  <!-- OVERLAY LAYER -->\n`;
-                // Mark the overlay group as a real SVG layer (both
-                // Inkscape and Adobe Illustrator layer hints) so it
-                // appears as a named sibling of Thrucut in the
-                // Layers panel rather than being demoted to a
-                // sublayer of Thrucut.
                 svgBody += `  <g id="Overlay" class="overlay-layer"`
                     + ` inkscape:groupmode="layer" inkscape:label="Overlay"`
                     + ` xmlns:i="http://ns.adobe.com/AdobeIllustrator/10.0/" i:layer="yes"`
-                    + ` transform="${overlayTransform}">\n`;
+                    + ` transform="${overlayTranslate}">\n`;
+                svgBody += overlayInnerSvgOpen;
                 svgBody += overlayData.innerContent;
-                svgBody += `\n  </g>\n`;
+                svgBody += `\n  ${overlayInnerSvgClose}  </g>\n`;
             }
 
             if (hasCutLayers) {
                 svgBody += `  <!-- THRUCUT LAYERS (cut paths for production cutting machines) -->\n`;
                 for (const layer of overlayData.cutLayers) {
-                    // Merge the overlay transform onto whatever transform
-                    // the cut group already had (typically none, but keep
-                    // composition correct just in case).
                     const existingTransform = (layer.attrs && layer.attrs.transform) ? layer.attrs.transform : '';
-                    const mergedTransform = existingTransform
-                        ? `${overlayTransform} ${existingTransform}`
-                        : overlayTransform;
                     const attrParts = [];
                     for (const [name, value] of Object.entries(layer.attrs || {})) {
                         if (name === 'transform') continue;
                         attrParts.push(`${name}="${this._escapeAttr(value)}"`);
                     }
-                    attrParts.push(`transform="${mergedTransform}"`);
+                    attrParts.push(`transform="${overlayTranslate}"`);
                     svgBody += `  <g ${attrParts.join(' ')}>\n`;
+                    svgBody += overlayInnerSvgOpen;
+                    if (existingTransform) {
+                        svgBody += `    <g transform="${this._escapeAttr(existingTransform)}">\n`;
+                    }
                     svgBody += layer.innerHTML;
-                    svgBody += `\n  </g>\n`;
+                    if (existingTransform) {
+                        svgBody += `\n    </g>`;
+                    }
+                    svgBody += `\n  ${overlayInnerSvgClose}  </g>\n`;
                 }
             }
         }

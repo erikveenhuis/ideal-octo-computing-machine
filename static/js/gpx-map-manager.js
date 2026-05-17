@@ -128,6 +128,13 @@ class GPXMapManager {
             ...mapInitSettings
         });
 
+        if (this.map.touchZoomRotate && typeof this.map.touchZoomRotate.disableRotation === 'function') {
+            this.map.touchZoomRotate.disableRotation();
+        }
+        if (this.map.touchPitch && typeof this.map.touchPitch.disable === 'function') {
+            this.map.touchPitch.disable();
+        }
+
         // Handle missing images in the style
         this.map.on('styleimagemissing', (e) => {
             const id = e.id;
@@ -138,10 +145,7 @@ class GPXMapManager {
             this.map.addImage(id, { width, height, data });
         });
 
-        // Add navigation controls (with compass)
-        this.map.addControl(new mapboxgl.NavigationControl({
-            showCompass: true
-        }));
+        this._wireBleedZoomControls();
 
         // Handle style data events
         this.map.on('styledata', () => {
@@ -159,6 +163,19 @@ class GPXMapManager {
         this.map.on('moveend', () => this._scheduleRefreshMarkersForViewport());
 
         return this.map;
+    }
+
+    _wireBleedZoomControls() {
+        const zoomIn = document.getElementById('mapBleedZoomIn');
+        const zoomOut = document.getElementById('mapBleedZoomOut');
+        if (!zoomIn || !zoomOut) return;
+
+        zoomIn.addEventListener('click', () => {
+            this.map.zoomIn({ duration: 300 });
+        });
+        zoomOut.addEventListener('click', () => {
+            this.map.zoomOut({ duration: 300 });
+        });
     }
 
     handleStyleDataChange() {

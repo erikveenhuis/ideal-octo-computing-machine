@@ -699,16 +699,23 @@ test('e2e: overlay -> SVGRenderer emits Thrucut as a separate top-level layer', 
         // The original group id is preserved (case-sensitive).
         assert.equal(cut.getAttribute('id'), 'Thrucut');
 
-        // Both Overlay and Thrucut must carry the viewBox-derived
-        // transform so the cut paths line up with the artwork.
+        // Both Overlay and Thrucut must share the same placement: translate()
+        // into the letterboxed position plus a nested <svg width height viewBox>
+        // (object-fit: contain) so cut paths align with the artwork.
         const transform = cut.getAttribute('transform') || '';
         assert.match(transform, /translate\(/, `Thrucut transform missing translate: ${transform}`);
-        assert.match(transform, /scale\(/,     `Thrucut transform missing scale: ${transform}`);
+        const nested = cut.querySelector('svg');
+        assert.ok(nested, 'Thrucut must wrap geometry in a nested <svg> for viewBox mapping');
+        assert.ok(nested.getAttribute('width'), 'Thrucut nested <svg> needs width');
+        assert.ok(nested.getAttribute('viewBox'), 'Thrucut nested <svg> needs viewBox');
     }
 
     const overlayTransform = overlayGroup.getAttribute('transform') || '';
     assert.match(overlayTransform, /translate\(/);
-    assert.match(overlayTransform, /scale\(/);
+    const overlayNested = overlayGroup.querySelector('svg');
+    assert.ok(overlayNested, 'Overlay must wrap artwork in a nested <svg>');
+    assert.ok(overlayNested.getAttribute('width'));
+    assert.ok(overlayNested.getAttribute('viewBox'));
 
     // ---- Content separation: text MUST NOT be in the cut layer --------
 

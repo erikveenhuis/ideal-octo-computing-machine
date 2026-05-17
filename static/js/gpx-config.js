@@ -16,6 +16,12 @@ const exportSettings = {
 const mapInitSettings = {
     center: [5.2913, 52.1326], // Note: Mapbox uses [lng, lat] order
     zoom: 7,
+    bearing: 0,
+    pitch: 0,
+    maxPitch: 0,
+    // GPX export assumes a north-up, flat view: projection + overlay stay aligned when
+    // bearing ~0° and pitch ~0°. Disable user rotation and tilt.
+    dragRotate: false,
     attributionControl: false,
     preserveDrawingBuffer: true,
     fadeDuration: 0,

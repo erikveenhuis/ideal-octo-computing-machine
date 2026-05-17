@@ -84,23 +84,21 @@
         display: none;
     }
 
-    /* Position Mapbox controls below the navigation bar */
-    .mapboxgl-ctrl-top-right {
-        position: fixed !important;
-        top: 7rem !important; /* Below the 4rem navigation bar */
-        right: 1rem !important;
-        z-index: 50 !important;
-    }
-
-    /* Ensure Mapbox controls stay above everything */
-    .mapboxgl-ctrl-group,
-    .mapboxgl-ctrl {
-        z-index: 50 !important;
+    /* Zoom controls sit in the gray bleed margin around the Thrucut frame */
+    .map-bleed-zoom {
+        position: absolute;
+        right: 1rem;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 50;
+        float: none;
+        margin: 0;
     }
 
     /* Clean up - no mobile support needed since we show message instead */
     @media print {
-        .sidebar, .sidebar-content, .controls, .nav-links, #message, .mapboxgl-control-container {
+        .sidebar, .sidebar-content, .controls, .nav-links, #message, .mapboxgl-control-container,
+        .map-bleed-zoom {
             display: none !important;
         }
         .map-container {

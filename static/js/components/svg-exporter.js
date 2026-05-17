@@ -80,21 +80,71 @@ class SVGExporter {
             const pitch = map.getPitch();
             console.log('✅ Got map state');
             
-            // Pixel viewport must match map.project() / map.unproject(): Mapbox uses
-            // transform.width/height (CSS px, may be fractional). clientWidth can
-            // differ slightly and causes PDF vs canvas drift.
+            // SVG width/height must match map.project / unproject. transform can be fractional
+            // while clientWidth/Height are integers — both are within ~1px, but always picking
+            // client alone biases smaller when transform rounds up (e.g. tw≈800.6 vs client 800),
+            // narrowing the overlay (right edge left) and nudging it north. Use max(client,
+            // round(transform)) so we never shrink below the rounded transform while still
+            // aligning to the DOM grid when they agree within 1px.
+            //
+            // Overlay uses object-fit: contain in map width×height (see svg-renderer.js + domOverlayFit).
+            //
+            // Prefer transform first; fall back to #map client box, then canvas rect.
             const mapCanvas = map.getCanvas();
+            const mapContainer = map.getContainer();
             const rect = mapCanvas.getBoundingClientRect();
             const tr = map.transform;
             const tw = tr && typeof tr.width === 'number' && tr.width > 0 ? tr.width : null;
             const th = tr && typeof tr.height === 'number' && tr.height > 0 ? tr.height : null;
-            const canvasWidth = tw ?? (mapCanvas.clientWidth || Math.max(1, Math.round(rect.width)));
-            const canvasHeight = th ?? (mapCanvas.clientHeight || Math.max(1, Math.round(rect.height)));
+            const clientW =
+                (mapContainer && mapContainer.clientWidth > 0 && mapContainer.clientWidth) ||
+                (mapCanvas.clientWidth > 0 && mapCanvas.clientWidth) ||
+                null;
+            const clientH =
+                (mapContainer && mapContainer.clientHeight > 0 && mapContainer.clientHeight) ||
+                (mapCanvas.clientHeight > 0 && mapCanvas.clientHeight) ||
+                null;
+            const rawW = tw ?? clientW ?? (rect.width > 0 ? rect.width : null);
+            const rawH = th ?? clientH ?? (rect.height > 0 ? rect.height : null);
+            let canvasWidth = Math.max(1, Number(rawW ?? 1));
+            let canvasHeight = Math.max(1, Number(rawH ?? 1));
+            // Integer box matching #map clientWidth × clientHeight when transform is within ~1px.
+            // Prefer max(client, round(transform)) — not client alone — so a slightly larger
+            // transform (e.g. 800.7 vs client 800) does not shrink the medal vs the WebGL view.
+            if (
+                clientW > 0 &&
+                clientH > 0 &&
+                tw != null &&
+                th != null &&
+                Math.abs(tw - clientW) <= 1 &&
+                Math.abs(th - clientH) <= 1
+            ) {
+                canvasWidth = Math.max(clientW, Math.round(tw));
+                canvasHeight = Math.max(clientH, Math.round(th));
+            }
+            // Layout box for the overlay <img> is the #map element. clientHeight and
+            // rounded transform are integers, but getBoundingClientRect().height can be a
+            // fraction of a pixel larger. Browsers center object-fit in that rect; if the
+            // export uses a shorter height, vertical margins are too small and the medal sits
+            // too far north. Expand W/H when within a few px of the measured layout box.
+            if (mapContainer && typeof mapContainer.getBoundingClientRect === 'function') {
+                const mr = mapContainer.getBoundingClientRect();
+                const eps = 2.5;
+                if (mr.width > 0 && Math.abs(mr.width - canvasWidth) <= eps) {
+                    canvasWidth = Math.max(canvasWidth, mr.width);
+                }
+                if (mr.height > 0 && Math.abs(mr.height - canvasHeight) <= eps) {
+                    canvasHeight = Math.max(canvasHeight, mr.height);
+                }
+            }
             const internalWidth = mapCanvas.width;
             const internalHeight = mapCanvas.height;
             
             console.log('✅ Got canvas dimensions');
-            console.log(`Canvas analysis - Layout: ${canvasWidth}x${canvasHeight}, Internal: ${internalWidth}x${internalHeight}, Pixel ratio: ${window.devicePixelRatio || 1}`);
+            console.log(
+                `Canvas analysis - Export: ${canvasWidth}x${canvasHeight} (client ${clientW ?? '—'}×${clientH ?? '—'}, ` +
+                `transform ${tw ?? '—'}×${th ?? '—'}), Internal bitmap: ${internalWidth}x${internalHeight}, DPR: ${window.devicePixelRatio || 1}`
+            );
             
             // FIXED: Use actual canvas dimensions without scaling to match screen view
             // The scaling factor was making the export too large and zoomed in
@@ -1537,6 +1587,38 @@ class SVGExporter {
             let overlayExportData = null;
             if (window.gpxApp && typeof window.gpxApp.getOverlayExportData === 'function') {
                 overlayExportData = await window.gpxApp.getOverlayExportData();
+                // Overlay preview is a data: URI <img>; natural dimensions only exist after decode.
+                // naturalWidth/Height are only used to confirm the <img> decoded; overlay scale
+                // in svg-renderer uses the overlay viewBox (fractional) so it matches map space.
+                if (overlayExportData && typeof document !== 'undefined') {
+                    const img = document.getElementById('mapOverlayImage');
+                    if (img) {
+                        if (!img.complete || img.naturalWidth === 0) {
+                            await new Promise((resolve) => {
+                                const done = () => resolve();
+                                img.addEventListener('load', done, { once: true });
+                                img.addEventListener('error', done, { once: true });
+                                setTimeout(done, 3000);
+                            });
+                        }
+                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            // Layout box must match the same CSS width×height as MapProjection /
+                            // map.project(), not img.getBoundingClientRect(). Rounding or subpixel
+                            // differences between the map container and getBoundingClientRect() were
+                            // inflating object-fit scale (especially when height binds), making the
+                            // medal wider / taller vs routes.
+                            overlayExportData = {
+                                ...overlayExportData,
+                                domOverlayFit: {
+                                    naturalW: img.naturalWidth,
+                                    naturalH: img.naturalHeight,
+                                    layoutW: canvasWidth,
+                                    layoutH: canvasHeight,
+                                },
+                            };
+                        }
+                    }
+                }
             }
 
             // Create SVG document
