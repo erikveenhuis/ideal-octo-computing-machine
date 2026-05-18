@@ -19,7 +19,7 @@ sphinx-rtd-theme>=3.1.0
 
 # Type Checking
 mypy>=2.1.0
-types-requests>=2.33.0.20260513
+types-requests>=2.33.0.20260518
 
 # Security
 bandit>=1.9.4
