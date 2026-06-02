@@ -23,7 +23,7 @@ types-requests>=2.33.0.20260513
 
 # Security
 bandit>=1.9.4
-safety>=3.7.0
+safety>=3.8.1
 
 # Development Tools
 pre-commit>=4.6.0
