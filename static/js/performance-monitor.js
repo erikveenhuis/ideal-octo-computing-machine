@@ -255,7 +255,7 @@ class PerformanceMonitor {
     async testResourceLoading() {
         const testUrls = [
             'https://cdn.tailwindcss.com',
-            'https://cdn.jsdelivr.net/npm/pica@9.0.1/dist/pica.min.js'
+            'https://cdn.jsdelivr.net/npm/pica@10.0.1/dist/pica.min.js'
         ];
         
         const results = [];
