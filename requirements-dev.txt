@@ -27,4 +27,4 @@ safety>=3.8.1
 
 # Development Tools
 pre-commit>=4.6.0
-pip-tools>=7.5.3
+pip-tools>=7.6.0
