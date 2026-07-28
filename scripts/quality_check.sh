@@ -37,6 +37,15 @@ pytest --cov=. --cov-report=term --cov-fail-under=80
 
 # 3. JS test harness — same node:test runner CI uses.
 if command -v npm >/dev/null 2>&1; then
+    if [ -f ".nvmrc" ] && command -v node >/dev/null 2>&1; then
+        required_major="$(tr -d '[:space:]' < .nvmrc | cut -d. -f1)"
+        current_major="$(node -p "process.versions.node.split('.')[0]")"
+        if [ "$current_major" -lt "$required_major" ]; then
+            echo "Error: Node.js ${required_major}+ required (jsdom 30). Current: $(node --version)"
+            echo "Run: nvm install && nvm use"
+            exit 1
+        fi
+    fi
     if [ ! -d "node_modules" ]; then
         echo "==> installing JS dev deps (npm ci)"
         npm ci

@@ -73,8 +73,8 @@ This project maintains high code quality standards:
 - **Pylint**: 10.00/10 (CI gate: `--fail-under=9.0`)
 - **Pytest**: ~280 tests, ~94% line coverage (`pytest.ini` + CI:
   `--cov-fail-under=80`)
-- **JS tests**: 32 `node:test` cases for the SVG export pipeline
-- **CI**: GitHub Actions runs pylint + pytest + `npm test` on Python 3.13
+- **JS tests**: 71 `node:test` cases for the SVG export pipeline (Node.js 24+)
+- **CI**: GitHub Actions runs pylint + pytest + `npm test` on Python 3.13 and Node.js 24
 - **Local quality tools**: Run `./scripts/quality_check.sh`
 
 ## Running Tests
@@ -82,6 +82,8 @@ This project maintains high code quality standards:
 ```bash
 # Install dev dependencies (once) — required for pytest-cov and pylint
 pip install -r requirements-dev.txt
+
+# Node.js 24+ (jsdom 30). Use nvm: `nvm install` reads .nvmrc.
 npm install
 
 # Python suite (coverage + 80 % gate are set in pytest.ini)
