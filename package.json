@@ -2,6 +2,9 @@
   "name": "ideal-octo-computing-machine",
   "private": true,
   "description": "JS test harness for the GPX SVG export components.",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
   "scripts": {
     "test": "node --test tests-js/*.test.js",
     "test:e2e:placenames": "node tests-js/e2e/gpx-placename-pdf-parity.cjs"
